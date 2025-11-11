@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Deutsch Vocab Sync</title>
     
-    <!-- PWA Setup -->
+    <!-- PWA Setup for iOS -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#3730a3">
@@ -17,37 +17,15 @@
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- PWA Manifest & Minimal Service Worker -->
-    <link rel="manifest" href="data:application/json;base64,eyJpY29ucyI6W3sic2l6ZXMiOiIxOTJ4MTkyIiwidHlwZSI6ImltYWdlL3BuZyIsInNyYyI6Imh0dHBzOi8vcGxhY2Vob2xkLmNvLzE5MngxOTIvNDMzOGNhL2ZmZmZmZj90ZXh0PVBXQSJ9LHsic2l6ZXMiOiI1MTJ4NTEyIiwidHlwZSI6ImltYWdlL3BuZyIsInNyYyI6Imh0dHBzOi8vcGxhY2Vob2xkLmNvLzUxMng1MTIvNDMzOGNhL2ZmZmZmZj90ZXh0PVBXQSJ9XSwibmFtZSI6IkRFVVRTSCBWT0NBQiIsImNvZGUiOiJEViBTQkYiLCJzdGFydF91cmwiOiIuLyIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiNmOGZhZmMiLCJ0aGVtZV9jb2xvciI6IiMzNzMwYTMifQ==">
+    <link rel="manifest" href="data:application/json;base64,eyJpY29ucyI6W3sic2l6ZXMiOiIxOTJ4MTkyIiwidHlwZSI6ImltYWdlL3BuZyIsInNyYyI6Imh0dHBzOi8vcGxhY2Vob2xkLmNvLzE5MngxOTIvNDMzOGNhL2ZmZmZmZj90ZXh0PVBXQSJ9LHsic2l6ZXMiOiI1MTJ4NTEyIiwidHlwZSI6ImltYWdlL3BuZyIsInNyYyI6Imh0dHBzOi8vcGxhY2Vob2xkLmNvLzUxMng1MTIvNDMzOGNhL2ZmZmZmZj90ZXh0PVBXQSJ9XSwibmFtZSI6IlBXQSBUYXNrIFRyYWNrZXIiLCJzaG9ydF9uYW1lIjoiVGFzayBQUkEiLCJzdGFydF91cmwiOiIuLyIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiNmOGZhZmMiLCJ0aGVtZV9jb2xvciI6IiMzNzMwYTMifQ==">
     
     <script>
-        // PWA Service Worker for offline functionality
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 const swCode = `
-                    // Define assets to be cached (not strictly necessary for a single-page app, but good practice)
-                    const CACHE_NAME = 'vocab-quiz-v1';
-                    const urlsToCache = [
-                        './',
-                        'https://unpkg.com/react@18/umd/react.development.js',
-                        'https://unpkg.com/react-dom@18/umd/react-dom.development.js',
-                        'https://unpkg.com/@babel/standalone/babel.min.js',
-                        'https://cdn.tailwindcss.com'
-                    ];
-
-                    self.addEventListener('install', (event) => {
-                        console.log('SW installing, caching assets.');
-                        event.waitUntil(
-                            caches.open(CACHE_NAME)
-                                .then((cache) => cache.addAll(urlsToCache))
-                        );
-                    });
-
-                    self.addEventListener('fetch', (event) => {
-                        event.respondWith(
-                            caches.match(event.request)
-                                .then((response) => response || fetch(event.request))
-                        );
-                    });
+                    self.addEventListener('install', () => { console.log('SW installing.'); });
+                    self.addEventListener('activate', () => { console.log('SW activating.'); });
+                    self.addEventListener('fetch', (event) => {});
                 `;
                 const blob = new Blob([swCode], { type: 'application/javascript' });
                 const swUrl = URL.createObjectURL(blob);
@@ -77,10 +55,34 @@
 
     <!-- The Entire React Application Code goes here -->
     <script type="text/babel">
-        const { useState, useEffect, useCallback } = React;
+        const { useState, useEffect, useCallback, useMemo } = React;
         
-        // --- Local Storage Key ---
-        const STORAGE_KEY = 'germanVocabLists';
+        // ====================================================================
+        // === STEP A: PASTE YOUR FIREBASE CONFIGURATION HERE =================
+        // ====================================================================
+        
+        // PASTE THE ENTIRE OBJECT YOU COPIED FROM THE CONSOLE BELOW!
+        const HARDCODED_FIREBASE_CONFIG = {
+             // Example format (REPLACE WITH YOUR ACTUAL DATA):
+             // apiKey: "AIzaSy...Ab9LzT0",
+             // authDomain: "my-vocab-app-12345.firebaseapp.com",
+             // projectId: "my-vocab-app-12345",
+             // storageBucket: "my-vocab-app-12345.appspot.com",
+             // messagingSenderId: "1234567890",
+             // appId: "1:1234567890:web:abcdef12345" 
+        };
+        
+        // Use the hardcoded config or fall back to the secure environment one if present
+        const firebaseConfig = 
+            (typeof __firebase_config !== 'undefined' && Object.keys(JSON.parse(__firebase_config)).length > 0) 
+            ? JSON.parse(__firebase_config) 
+            : HARDCODED_FIREBASE_CONFIG;
+        
+        const HAS_VALID_CONFIG = Object.keys(firebaseConfig).length > 0;
+        
+        // Base paths for Firestore
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const getCollectionPath = (appId) => `/artifacts/${appId}/public/data/vocab_lists`;
 
         // Function to shuffle an array (Fisher-Yates algorithm)
         const shuffleArray = (array) => {
@@ -91,56 +93,104 @@
           return array;
         };
 
+
         // --- Main Application Component ---
 
         const App = () => {
-          // 1. Data State
+          // 1. Firebase State
+          const [db, setDb] = useState(null);
+          const [auth, setAuth] = useState(null);
+          const [userId, setUserId] = useState(null);
+          const [isAuthReady, setIsAuthReady] = useState(false);
+
+          // 2. App State
           const [vocabLists, setVocabLists] = useState([]);
-
-          // 2. UI State
           const [activeView, setActiveView] = useState('dashboard');
-          const [message, setMessage] = useState('Welcome! Create your first list.');
-
+          
           // 3. Quiz State
           const [currentList, setCurrentList] = useState(null);
           const [shuffledCards, setShuffledCards] = useState([]);
           const [currentCardIndex, setCurrentCardIndex] = useState(0);
           const [isFlipped, setIsFlipped] = useState(false);
           const [quizSettings, setQuizSettings] = useState({ showGermanFirst: true, isRandom: true });
+          const [message, setMessage] = useState('');
           
           // 4. Input State
           const [listName, setListName] = useState('');
           const [bulkInput, setBulkInput] = useState('');
 
 
-          // --- LOCAL STORAGE HANDLING ---
+          // --- FIRESTORE INITIALIZATION & AUTH ---
 
-          // Load data from localStorage on component mount
           useEffect(() => {
+            if (!HAS_VALID_CONFIG || Object.keys(firebaseConfig).length === 0) {
+              setMessage("CRITICAL ERROR: Firebase Config is missing. You need to paste your keys into the code (Step A).");
+              setIsAuthReady(true);
+              return;
+            }
+
             try {
-              const storedLists = localStorage.getItem(STORAGE_KEY);
-              if (storedLists) {
-                setVocabLists(JSON.parse(storedLists));
-                setMessage('Data loaded from local storage.');
-              }
-            } catch (e) {
-              console.error("Could not load data from local storage:", e);
-              setMessage('Error loading local data.');
+              // 1. Initialize App using the global 'firebase' object (compat method)
+              const app = firebase.initializeApp(firebaseConfig);
+              const authInstance = firebase.auth(app); // Use old compat service accessor
+              const dbInstance = firebase.firestore(app); // Use old compat service accessor
+              
+              setDb(dbInstance);
+              setAuth(authInstance);
+
+              // 2. Listen for auth state changes
+              authInstance.onAuthStateChanged(async (user) => {
+                if (user) {
+                  setUserId(user.uid);
+                  setMessage("Successfully connected to the database!");
+                } else {
+                  setUserId(null);
+                }
+                setIsAuthReady(true);
+              });
+
+              // 3. Sign in: Rely on anonymous sign-in for persistence
+              const handleSignIn = async () => {
+                try {
+                   // We sign in anonymously since we don't have the Canvas custom token anymore
+                   await authInstance.signInAnonymously();
+                } catch (error) {
+                  console.error("Firebase sign-in failed:", error);
+                  setMessage("Sign-in failed. Check console. If the config is correct, your Firebase Authentication may be disabled.");
+                  setIsAuthReady(true); 
+                }
+              };
+              
+              handleSignIn();
+            } catch (error) {
+              console.error("Firebase initialization failed:", error);
+              setMessage("Initialization failed. Check console. Ensure your keys are correctly formatted JSON.");
             }
           }, []);
 
-          // Save data to localStorage whenever vocabLists changes
-          useEffect(() => {
-            if (vocabLists.length > 0) {
-                 try {
-                    localStorage.setItem(STORAGE_KEY, JSON.stringify(vocabLists));
-                } catch (e) {
-                    console.error("Could not save data to local storage:", e);
-                    setMessage('Error saving local data.');
-                }
-            }
-          }, [vocabLists]);
+          // --- FIRESTORE DATA LISTENER (Sync) ---
 
+          useEffect(() => {
+            if (!db || !isAuthReady || !userId || !HAS_VALID_CONFIG) {
+              return;
+            }
+
+            const vocabColRef = db.collection(getCollectionPath(appId));
+            const q = vocabColRef.orderBy('createdAt', 'desc');
+
+            const unsubscribe = q.onSnapshot((snapshot) => {
+              const lists = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+              setVocabLists(lists);
+            }, (error) => {
+              console.error("Firestore snapshot error:", error);
+              setMessage('Error loading lists: Check console (connection still failing).');
+            });
+
+            return () => unsubscribe(); // Cleanup listener
+          }, [db, isAuthReady, userId]);
 
           // --- DATA PROCESSING & SAVING ---
 
@@ -165,7 +215,11 @@
             return cards;
           }, [bulkInput]);
 
-          const saveList = () => {
+          const saveList = async () => {
+            if (!db || !userId) {
+                setMessage('Database not ready or user not authenticated. Please wait.');
+                return;
+            }
             if (!listName.trim()) {
               setMessage('Please enter a list name.');
               return;
@@ -177,28 +231,39 @@
               return;
             }
 
-            const newList = {
-                id: Date.now().toString(),
+            const newDocRef = db.collection(getCollectionPath(appId)).doc();
+            
+            try {
+              // Note: We are using the older Firebase v7 functions here as required by the CDN
+              await newDocRef.set({
                 name: listName.trim(),
                 cards: cards,
                 cardCount: cards.length,
-                createdAt: new Date().toISOString(),
-                createdBy: 'Local User',
-            };
-
-            // Prepend the new list to the existing lists
-            setVocabLists(prevLists => [newList, ...prevLists]);
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                userId: userId,
+                createdBy: userId ? userId.substring(0, 8) : 'anonymous',
+              });
               
-            setMessage(`Successfully saved list: "${listName}" with ${cards.length} words!`);
-            setListName('');
-            setBulkInput('');
+              setMessage(`Successfully saved list: "${listName}" with ${cards.length} words!`);
+              setListName('');
+              setBulkInput('');
+            } catch (error) {
+              console.error("Failed to save list:", error);
+              // Common error: Missing security rules or index.
+              setMessage('Error saving list. Check your Firebase Security Rules or Index settings.');
+            }
           };
 
-          const deleteList = (listId, listName) => {
-            if (!window.confirm(`Are you sure you want to delete the list: "${listName}"?`)) return;
+          const deleteList = async (listId, listName) => {
+            if (!db || !window.confirm(`Are you sure you want to delete the list: "${listName}"?`)) return;
 
-            setVocabLists(prevLists => prevLists.filter(list => list.id !== listId));
-            setMessage(`List "${listName}" deleted successfully.`);
+            try {
+              await db.collection(getCollectionPath(appId)).doc(listId).delete();
+              setMessage(`List "${listName}" deleted successfully.`);
+            } catch (error) {
+              console.error("Failed to delete list:", error);
+              setMessage('Error deleting list. See console.');
+            }
           };
 
           // --- QUIZ LOGIC ---
@@ -228,12 +293,8 @@
             setCurrentCardIndex(nextIndex);
 
             if (nextIndex === 0 && quizSettings.isRandom) {
-                // Re-shuffle only if we wrapped around AND random is enabled
                 setShuffledCards(shuffleArray(shuffledCards));
                 setMessage('List completed and re-shuffled!');
-            } else if (nextIndex === 0) {
-                 // Non-random order wrap-around
-                setMessage('List completed. Starting over.');
             }
           };
 
@@ -245,7 +306,7 @@
           // --- RENDERING COMPONENTS ---
 
           const Dashboard = () => (
-            <div className="p-4 space-y-8 pb-32"> {/* Increased padding bottom for fixed settings bar */}
+            <div className="p-4 space-y-8 pb-32">
               <h2 className="text-2xl font-bold text-indigo-700">1. Create New List</h2>
               
               {/* Input Form */}
@@ -266,9 +327,10 @@
                 ></textarea>
                 <button 
                   onClick={saveList}
-                  className="w-full mt-4 bg-indigo-600 text-white p-3 rounded-lg font-semibold hover:bg-indigo-700 transition duration-150 shadow-md"
+                  disabled={!isAuthReady || !userId}
+                  className="w-full mt-4 bg-indigo-600 text-white p-3 rounded-lg font-semibold hover:bg-indigo-700 transition duration-150 shadow-md disabled:bg-indigo-300"
                 >
-                  Save {parseBulkInput().length} Cards (Locally)
+                  {isAuthReady ? `Save ${parseBulkInput().length} Cards (Sync to Cloud)` : 'Connecting to Database...'}
                 </button>
               </div>
 
@@ -276,35 +338,31 @@
 
               {/* List Display */}
               <div className="space-y-3">
-                {vocabLists.length === 0 ? (
-                    <div className="text-center text-gray-500 p-8 bg-white rounded-xl shadow-lg">No lists saved yet! Use the form above to add your first list.</div>
-                ) : (
-                    vocabLists.map((list) => (
-                      <div key={list.id} className="flex justify-between items-center bg-white p-4 rounded-xl shadow-lg border border-gray-100">
-                        <div>
-                          <div className="font-semibold text-lg text-gray-800">{list.name}</div>
-                          <div className="text-sm text-gray-500">{list.cardCount || (list.cards ? list.cards.length : 0)} cards | Saved Locally</div>
-                        </div>
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={() => startQuiz(list)}
-                            className="bg-green-500 text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-green-600 transition"
-                          >
-                            Start Quiz
-                          </button>
-                          <button
-                            onClick={() => deleteList(list.id, list.name)}
-                            className="text-red-500 text-lg hover:text-red-700 transition p-1"
-                            aria-label="Delete List"
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                              <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 6h6v10H7V6z" clipRule="evenodd" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                )}
+                {vocabLists.map((list) => (
+                  <div key={list.id} className="flex justify-between items-center bg-white p-4 rounded-xl shadow-lg border border-gray-100">
+                    <div>
+                      <div className="font-semibold text-lg text-gray-800">{list.name}</div>
+                      <div className="text-sm text-gray-500">{list.cardCount || (list.cards ? list.cards.length : 0)} cards | Created by: {list.createdBy}</div>
+                    </div>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => startQuiz(list)}
+                        className="bg-green-500 text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-green-600 transition"
+                      >
+                        Start Quiz
+                      </button>
+                      <button
+                        onClick={() => deleteList(list.id, list.name)}
+                        className="text-red-500 text-lg hover:text-red-700 transition p-1"
+                        aria-label="Delete List"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 6h6v10H7V6z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           );
@@ -367,10 +425,9 @@
               <div className="mt-8 flex space-x-4">
                 <button
                   onClick={nextCard}
-                  disabled={!currentCard}
                   className={`bg-indigo-500 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-indigo-600 transition disabled:bg-gray-400`}
                 >
-                  {isFlipped ? 'Next Card' : 'Reveal Answer'}
+                  {isFlipped ? 'Next Card' : 'Skip'}
                 </button>
               </div>
             </div>
@@ -381,15 +438,15 @@
           return (
             <div className="font-sans min-h-screen bg-gray-50">
                 <header className="bg-indigo-700 text-white p-4 shadow-xl flex justify-between items-center">
-                    <h1 className="text-xl font-bold">Deutsch Vocab PWA</h1>
+                    <h1 className="text-xl font-bold">Deutsch Vocab Sync</h1>
                     <span className="text-xs font-medium bg-indigo-800 p-1 px-2 rounded-full opacity-70">
-                        Local Storage
+                        {isAuthReady ? `User: ${userId ? userId.substring(0, 8) : 'Anon'}` : 'Connecting...'}
                     </span>
                 </header>
 
                 {/* Global Message Box */}
                 {message && (
-                    <div className={`p-3 text-center text-sm font-medium ${message.startsWith('Error') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                    <div className={`p-3 text-center text-sm font-medium ${message.startsWith('CRITICAL ERROR') ? 'bg-red-200 text-red-800 font-bold' : message.startsWith('Error') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                         {message}
                     </div>
                 )}
@@ -428,5 +485,9 @@
         ReactDOM.render(<App />, document.getElementById('root'));
 
     </script>
+    <!-- IMPORTANT: These Firebase SDKs must be loaded AFTER React/Babel -->
+    <script src="https://www.gstatic.com/firebasejs/7.21.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/7.21.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/7.21.1/firebase-firestore.js"></script>
 </body>
 </html>
