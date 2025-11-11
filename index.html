@@ -58,10 +58,13 @@
         const { useState, useEffect, useCallback, useMemo } = React;
         
         // --- Global Variable Configuration ---
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
+        // CRITICAL FIX: Check if the config is available. 
+        const HAS_CONFIG = typeof __firebase_config !== 'undefined' && __firebase_config !== '{}';
+        
+        const appId = HAS_CONFIG ? __app_id : 'default-app-id';
+        const firebaseConfig = HAS_CONFIG ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = HAS_CONFIG ? __initial_auth_token : null;
+        
         // The database path for public, shared vocabulary lists
         // Note: Using the collection method from the older SDK style
         const getCollectionPath = (appId) => `/artifacts/${appId}/public/data/vocab_lists`;
@@ -105,9 +108,10 @@
           // --- FIRESTORE INITIALIZATION & AUTH (Using stable compat methods) ---
 
           useEffect(() => {
-            if (!firebaseConfig || Object.keys(firebaseConfig).length === 0) {
-              console.error("Firebase configuration is missing.");
-              setMessage("Error: Firebase config missing.");
+            if (!HAS_CONFIG || Object.keys(firebaseConfig).length === 0) {
+              console.error("Firebase configuration is unavailable. App must be run within the secure Canvas environment.");
+              setMessage("CRITICAL ERROR: Firebase Config Missing. Access this app via the shared link in the Canvas environment.");
+              setIsAuthReady(true);
               return;
             }
 
@@ -141,7 +145,7 @@
                 } catch (error) {
                   console.error("Firebase sign-in failed:", error);
                   setMessage("Sign-in failed. Check console.");
-                  setIsAuthReady(true); // Still ready to attempt DB ops, but maybe limited
+                  setIsAuthReady(true);
                 }
               };
               
@@ -155,7 +159,7 @@
           // --- FIRESTORE DATA LISTENER (Sync) ---
 
           useEffect(() => {
-            if (!db || !isAuthReady) {
+            if (!db || !isAuthReady || !HAS_CONFIG) {
               return;
             }
 
@@ -171,7 +175,7 @@
               }));
               setVocabLists(lists);
               // Only update success message after the first successful load
-              if (lists.length > 0 || message !== "Successfully connected!") {
+              if (message !== "Successfully connected!") {
                 setMessage("Successfully connected!");
               }
             }, (error) => {
@@ -437,7 +441,7 @@
 
                 {/* Global Message Box */}
                 {message && (
-                    <div className={`p-3 text-center text-sm font-medium ${message.startsWith('Error') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                    <div className={`p-3 text-center text-sm font-medium ${message.startsWith('CRITICAL ERROR') ? 'bg-red-200 text-red-800 font-bold' : message.startsWith('Error') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                         {message}
                     </div>
                 )}
