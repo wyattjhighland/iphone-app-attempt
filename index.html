@@ -13,30 +13,10 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#3730a3">
 
-    <!-- Simulate manifest.json using internal script tags -->
-    <script id="manifest-data" type="application/json">
-    {
-      "name": "PWA Task Tracker",
-      "short_name": "Task PWA",
-      "start_url": ".",
-      "display": "standalone",
-      "background_color": "#f8fafc",
-      "theme_color": "#3730a3",
-      "icons": [
-        {
-          "src": "https://placehold.co/192x192/4338ca/ffffff?text=PWA",
-          "sizes": "192x192",
-          "type": "image/png"
-        },
-        {
-          "src": "https://placehold.co/512x512/4338ca/ffffff?text=PWA",
-          "sizes": "512x512",
-          "type": "image/png"
-        }
-      ]
-    }
-    </script>
-    <!-- End PWA Setup -->
+    <!-- *** NEW: Link to the external manifest.json file *** -->
+    <link rel="manifest" href="/manifest.json">
+    
+    <!-- *** OLD: Removed the <script id="manifest-data" ... > block that was here *** -->
 
     <style>
         /* Define the font family for Inter */
@@ -202,10 +182,20 @@
         // Initial render
         renderTasks();
 
-        // --- PWA Service Worker (Optional but Best Practice) ---
-        // Service Worker setup is complex for a single HTML file and relies on 
-        // external files. However, the manifest settings above are often enough 
-        // for "Add to Home Screen" prompt in modern Safari/iOS.
+        // --- PWA Service Worker Registration (The new required code) ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                // We register the service worker file we will create next
+                navigator.serviceWorker.register('/task-pwa-sw.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                    })
+                    .catch(error => {
+                        console.log('ServiceWorker registration failed: ', error);
+                    });
+            });
+        }
+        // --- End of new code ---
 
     </script>
 </body>
