@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deutsch Vocab Sync</title>
+    
+    <!-- PWA Setup for iOS -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#3730a3">
+    
+    <!-- External Links for React, Tailwind, and Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- PWA Manifest & Minimal Service Worker -->
+    <link rel="manifest" href="data:application/json;base64,eyJpY29ucyI6W3sic2l6ZXMiOiIxOTJ4MTkyIiwidHlwZSI6ImltYWdlL3BuZyIsInNyYyI6Imh0dHBzOi8vcGxhY2Vob2xkLmNvLzE5MngxOTIvNDMzOGNhL2ZmZmZmZj90ZXh0PVBXQSJ9LHsic2l6ZXMiOiI1MTJ4NTEyIiwidHlwZSI6ImltYWdlL3BuZyIsInNyYyI6Imh0dHBzOi8vcGxhY2Vob2xkLmNvLzUxMng1MTIvNDMzOGNhL2ZmZmZmZj90ZXh0PVBXQSJ9XSwibmFtZSI6IlBXQSBUYXNrIFRyYWNrZXIiLCJzaG9ydF9uYW1lIjoiVGFzayBQUkEiLCJzdGFydF91cmwiOiIuLyIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiNmOGZhZmMiLCJ0aGVtZV9jb2xvciI6IiMzNzMwYTMifQ==">
+    
+    <!-- Minimal Service Worker (Embedded as data URI for single-file deployment) -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                // Register an *almost* empty service worker (required for PWA status on iOS)
+                const swCode = `
+                    self.addEventListener('install', () => { console.log('SW installing.'); });
+                    self.addEventListener('activate', () => { console.log('SW activating.'); });
+                    self.addEventListener('fetch', (event) => {});
+                `;
+                const blob = new Blob([swCode], { type: 'application/javascript' });
+                const swUrl = URL.createObjectURL(blob);
+
+                navigator.serviceWorker.register(swUrl, { scope: './' })
+                    .then(registration => console.log('SW registered:', registration.scope))
+                    .catch(error => console.error('SW registration failed:', error));
+            });
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+        .perspective {
+            perspective: 1000px;
+        }
+        .backface-hidden {
+            backface-visibility: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- The Entire React Application Code goes here -->
+    <script type="text/babel">
+        // Import all required Firebase modules directly
+        const { useState, useEffect, useCallback, useMemo } = React;
+        const { initializeApp } = firebase;
+        const { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } = firebase.auth;
+        const { getFirestore, doc, setDoc, onSnapshot, collection, query, orderBy, serverTimestamp, getDocs, deleteDoc } = firebase.firestore;
+        
+        // Ensure Firebase imports are available on window object for older environments
+        if (typeof firebase === 'undefined' || !firebase.firestore || !firebase.auth) {
+            console.error("Firebase SDK not loaded. Check CDN links.");
+        }
+
+
+        // --- Global Variable Configuration ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // The database path for public, shared vocabulary lists
+        const getCollectionPath = (appId) => `/artifacts/${appId}/public/data/vocab_lists`;
+
+        // --- Utility Functions ---
+
+        // Function to shuffle an array (Fisher-Yates algorithm)
+        const shuffleArray = (array) => {
+          for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+          }
+          return array;
+        };
+
+
+        // --- Main Application Component ---
+
+        const App = () => {
+          // 1. Firebase State
+          const [db, setDb] = useState(null);
+          const [userId, setUserId] = useState(null);
+          const [isAuthReady, setIsAuthReady] = useState(false);
+
+          // 2. App State
+          const [vocabLists, setVocabLists] = useState([]);
+          const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' or 'quiz'
+          
+          // 3. Quiz State
+          const [currentList, setCurrentList] = useState(null);
+          const [shuffledCards, setShuffledCards] = useState([]);
+          const [currentCardIndex, setCurrentCardIndex] = useState(0);
+          const [isFlipped, setIsFlipped] = useState(false);
+          const [quizSettings, setQuizSettings] = useState({ showGermanFirst: true, isRandom: true });
+          const [message, setMessage] = useState('');
+          
+          // 4. Input State
+          const [listName, setListName] = useState('');
+          const [bulkInput, setBulkInput] = useState('');
+
+
+          // --- FIRESTORE INITIALIZATION & AUTH ---
+
+          useEffect(() => {
+            if (!firebaseConfig || Object.keys(firebaseConfig).length === 0) {
+              console.error("Firebase configuration is missing.");
+              return;
+            }
+
+            try {
+              // setLogLevel('debug'); // Uncomment for detailed debug logs
+              const app = initializeApp(firebaseConfig);
+              const authInstance = getAuth(app);
+              const dbInstance = getFirestore(app);
+              
+              setDb(dbInstance);
+
+              // 1. Listen for auth state changes
+              const unsubscribe = onAuthStateChanged(authInstance, (user) => {
+                if (user) {
+                  setUserId(user.uid);
+                } else {
+                  // Fallback for anonymous users if sign-in fails or user logs out
+                  setUserId(crypto.randomUUID());
+                }
+                setIsAuthReady(true);
+              });
+
+              // 2. Sign in or sign up
+              const handleSignIn = async () => {
+                try {
+                  if (initialAuthToken) {
+                    await signInWithCustomToken(authInstance, initialAuthToken);
+                  } else {
+                    // Use anonymous sign-in if no custom token is provided
+                    await signInAnonymously(authInstance);
+                  }
+                } catch (error) {
+                  console.error("Firebase sign-in failed:", error);
+                }
+              };
+              
+              handleSignIn();
+              return () => unsubscribe(); // Cleanup auth listener
+            } catch (error) {
+              console.error("Firebase initialization failed:", error);
+            }
+          }, []);
+
+          // --- FIRESTORE DATA LISTENER (Sync) ---
+
+          useEffect(() => {
+            if (!db || !isAuthReady) {
+              console.log('Waiting for DB or Auth to be ready...');
+              return;
+            }
+
+            // Set up real-time listener for all vocab lists in the public collection
+            const vocabColRef = collection(db, getCollectionPath(appId));
+            const q = query(vocabColRef, orderBy('createdAt', 'desc'));
+
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+              const lists = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+              setVocabLists(lists);
+              setMessage(`Loaded ${lists.length} vocabulary list(s).`);
+            }, (error) => {
+              console.error("Firestore snapshot error:", error);
+              setMessage('Error loading lists: Check console.');
+            });
+
+            return () => unsubscribe(); // Cleanup listener
+          }, [db, isAuthReady, userId]); // Re-run if db or auth state changes
+
+          // --- DATA PROCESSING & SAVING ---
+
+          const parseBulkInput = useCallback(() => {
+            if (!bulkInput.trim()) return [];
+
+            const lines = bulkInput.trim().split('\n');
+            const cards = [];
+
+            lines.forEach((line, index) => {
+              // Normalize line to use colon as a separator for German and English
+              const parts = line.split(/[:–-]/).map(p => p.trim()).filter(p => p.length > 0);
+              
+              if (parts.length >= 2) {
+                cards.push({
+                  german: parts[0],
+                  english: parts[1],
+                  notes: parts.slice(2).join('; ') || '', // Optional notes/example sentences
+                  id: `${Date.now()}-${index}`
+                });
+              }
+            });
+            return cards;
+          }, [bulkInput]);
+
+          const saveList = async () => {
+            if (!db) return;
+            if (!listName.trim()) {
+              setMessage('Please enter a list name.');
+              return;
+            }
+
+            const cards = parseBulkInput();
+            if (cards.length === 0) {
+              setMessage('Please paste vocabulary words in the format: German : English');
+              return;
+            }
+
+            const newDocRef = doc(collection(db, getCollectionPath(appId)));
+            
+            try {
+              await setDoc(newDocRef, {
+                name: listName.trim(),
+                cards: cards,
+                cardCount: cards.length,
+                createdAt: serverTimestamp(),
+                userId: userId,
+                createdBy: userId ? userId.substring(0, 8) : 'anonymous',
+              });
+              
+              setMessage(`Successfully saved list: "${listName}" with ${cards.length} words!`);
+              setListName('');
+              setBulkInput('');
+            } catch (error) {
+              console.error("Failed to save list:", error);
+              setMessage('Error saving list. See console.');
+            }
+          };
+
+          const deleteList = async (listId, listName) => {
+            if (!db || !window.confirm(`Are you sure you want to delete the list: "${listName}"?`)) return;
+
+            try {
+              await deleteDoc(doc(db, getCollectionPath(appId), listId));
+              setMessage(`List "${listName}" deleted successfully.`);
+            } catch (error) {
+              console.error("Failed to delete list:", error);
+              setMessage('Error deleting list. See console.');
+            }
+          };
+
+          // --- QUIZ LOGIC ---
+
+          const startQuiz = (list) => {
+            if (list.cards.length === 0) {
+              setMessage('Cannot start quiz: List is empty.');
+              return;
+            }
+            
+            const cardsToUse = quizSettings.isRandom ? shuffleArray([...list.cards]) : [...list.cards];
+
+            setCurrentList(list);
+            setShuffledCards(cardsToUse);
+            setCurrentCardIndex(0);
+            setIsFlipped(false);
+            setActiveView('quiz');
+            setMessage(`Quiz started: ${list.name}`);
+          };
+
+          const flipCard = () => setIsFlipped(true);
+
+          const nextCard = () => {
+            setIsFlipped(false);
+            
+            // Loop back to the start if we reach the end
+            const nextIndex = (currentCardIndex + 1) % shuffledCards.length;
+            setCurrentCardIndex(nextIndex);
+
+            // Optional: Re-shuffle when looping
+            if (nextIndex === 0 && quizSettings.isRandom) {
+                setShuffledCards(shuffleArray(shuffledCards));
+                setMessage('List completed and re-shuffled!');
+            }
+          };
+
+          const currentCard = shuffledCards.length > 0 ? shuffledCards[currentCardIndex] : null;
+
+          // Determines which side of the card is visible first
+          const primaryTerm = currentCard ? (quizSettings.showGermanFirst ? currentCard.german : currentCard.english) : '...';
+          const secondaryTerm = currentCard ? (quizSettings.showGermanFirst ? currentCard.english : currentCard.german) : '...';
+
+          // --- RENDERING COMPONENTS ---
+
+          const Dashboard = () => (
+            <div className="p-4 space-y-8">
+              <h2 className="text-2xl font-bold text-indigo-700">1. Create New List</h2>
+              
+              {/* Input Form */}
+              <div className="bg-white p-4 rounded-xl shadow-lg border border-gray-100">
+                <input 
+                  type="text" 
+                  placeholder="New List Name (e.g., A1 Verbs)"
+                  value={listName}
+                  onChange={(e) => setListName(e.target.value)}
+                  className="w-full p-3 mb-4 border border-indigo-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <textarea
+                  placeholder="Paste vocabulary here (one entry per line, using : or - to separate terms). Example: Tisch : Table"
+                  rows="6"
+                  value={bulkInput}
+                  onChange={(e) => setBulkInput(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-sm"
+                ></textarea>
+                <button 
+                  onClick={saveList}
+                  disabled={!db}
+                  className="w-full mt-4 bg-indigo-600 text-white p-3 rounded-lg font-semibold hover:bg-indigo-700 transition duration-150 shadow-md disabled:bg-indigo-300"
+                >
+                  {db ? `Save ${parseBulkInput().length} Cards` : 'Connecting to Database...'}
+                </button>
+              </div>
+
+              <h2 className="text-2xl font-bold text-indigo-700">2. Existing Lists ({vocabLists.length})</h2>
+
+              {/* List Display */}
+              <div className="space-y-3">
+                {vocabLists.map((list) => (
+                  <div key={list.id} className="flex justify-between items-center bg-white p-4 rounded-xl shadow-lg border border-gray-100">
+                    <div>
+                      <div className="font-semibold text-lg text-gray-800">{list.name}</div>
+                      <div className="text-sm text-gray-500">{list.cardCount || list.cards.length} cards | Created by: {list.createdBy}</div>
+                    </div>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => startQuiz(list)}
+                        className="bg-green-500 text-white px-3 py-1 rounded-full text-sm font-semibold hover:bg-green-600 transition"
+                      >
+                        Start Quiz
+                      </button>
+                      <button
+                        onClick={() => deleteList(list.id, list.name)}
+                        className="text-red-500 text-lg hover:text-red-700 transition p-1"
+                        aria-label="Delete List"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 6h6v10H7V6z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+
+          const QuizView = () => (
+            <div className="p-4 flex flex-col items-center justify-center min-h-screen-minus-header">
+              {currentList && (
+                <button 
+                  onClick={() => setActiveView('dashboard')}
+                  className="absolute top-4 left-4 text-indigo-600 hover:text-indigo-800 font-semibold flex items-center"
+                >
+                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                  Back to Lists
+                </button>
+              )}
+
+              {/* Quiz Progress */}
+              <div className="w-full max-w-sm text-center mb-4">
+                <p className="text-sm text-gray-600 font-medium">
+                  {currentList?.name} | Card {currentCardIndex + 1} of {shuffledCards.length}
+                </p>
+              </div>
+
+              {/* Flashcard Component */}
+              <div 
+                onClick={flipCard}
+                className="relative w-full max-w-sm h-72 perspective cursor-pointer transform transition-transform duration-500 [transform-style:preserve-3d]"
+              >
+                <div 
+                  className={`w-full h-full rounded-2xl shadow-2xl transition-transform duration-500 ${isFlipped ? '[transform:rotateY(180deg)]' : ''}`}
+                  style={{ transformStyle: 'preserve-3d' }}
+                >
+                  {/* Front Side (Primary Term) */}
+                  <div className="absolute w-full h-full bg-indigo-600 text-white rounded-2xl flex flex-col items-center justify-center backface-hidden p-6 text-center">
+                    <p className="text-sm font-light uppercase tracking-wider">
+                        {quizSettings.showGermanFirst ? 'German Term' : 'English Term'}
+                    </p>
+                    <h3 className="text-4xl font-extrabold mt-2 leading-tight">
+                      {primaryTerm}
+                    </h3>
+                    <span className="text-sm mt-4 p-2 bg-indigo-700/50 rounded-lg">Tap to Reveal</span>
+                  </div>
+
+                  {/* Back Side (Secondary Term) */}
+                  <div className="absolute w-full h-full bg-white text-gray-800 rounded-2xl flex flex-col items-center justify-center [transform:rotateY(180deg)] backface-hidden p-6 text-center border-4 border-indigo-600">
+                    <p className="text-sm font-light uppercase tracking-wider text-indigo-600">
+                        {quizSettings.showGermanFirst ? 'English Translation' : 'German Translation'}
+                    </p>
+                    <h3 className="text-3xl font-bold mt-2 leading-snug">
+                      {secondaryTerm}
+                    </h3>
+                    {currentCard?.notes && (
+                        <p className="text-xs text-gray-500 mt-3 italic">{currentCard.notes}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Quiz Controls */}
+              <div className="mt-8 flex space-x-4">
+                <button
+                  onClick={nextCard}
+                  className={`bg-indigo-500 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-indigo-600 transition disabled:bg-gray-400`}
+                >
+                  {isFlipped ? 'Next Card' : 'Skip'}
+                </button>
+              </div>
+            </div>
+          );
+
+          // --- Main Render ---
+
+          return (
+            <div className="font-sans min-h-screen bg-gray-50">
+                <header className="bg-indigo-700 text-white p-4 shadow-xl flex justify-between items-center">
+                    <h1 className="text-xl font-bold">Deutsch Vocab Sync</h1>
+                    <span className="text-xs font-medium bg-indigo-800 p-1 px-2 rounded-full opacity-70">
+                        {isAuthReady ? `User: ${userId ? userId.substring(0, 8) : 'Anon'}` : 'Connecting...'}
+                    </span>
+                </header>
+
+                {/* Global Message Box */}
+                {message && (
+                    <div className={`p-3 text-center text-sm font-medium ${message.startsWith('Error') ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                        {message}
+                    </div>
+                )}
+
+                {/* View Switcher */}
+                {activeView === 'dashboard' ? <Dashboard /> : <QuizView />}
+
+                {/* Quiz Settings Area (Fixed at bottom) */}
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-2xl p-3">
+                    <div className="max-w-md mx-auto flex justify-between items-center text-sm">
+                        <label className="flex items-center space-x-2 text-gray-700">
+                            <input 
+                                type="checkbox" 
+                                checked={quizSettings.showGermanFirst} 
+                                onChange={(e) => setQuizSettings({...quizSettings, showGermanFirst: e.target.checked})}
+                                className="form-checkbox h-4 w-4 text-indigo-600"
+                            />
+                            <span>Quiz German → English</span>
+                        </label>
+                        <label className="flex items-center space-x-2 text-gray-700">
+                            <input 
+                                type="checkbox" 
+                                checked={quizSettings.isRandom} 
+                                onChange={(e) => setQuizSettings({...quizSettings, isRandom: e.target.checked})}
+                                className="form-checkbox h-4 w-4 text-indigo-600"
+                            />
+                            <span>Random Order</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+          );
+        };
+
+        // Render the main App component
+        ReactDOM.render(<App />, document.getElementById('root'));
+
+    </script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
+</body>
+</html>
