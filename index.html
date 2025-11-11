@@ -15,15 +15,13 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-
+    
     <!-- PWA Manifest & Minimal Service Worker -->
     <link rel="manifest" href="data:application/json;base64,eyJpY29ucyI6W3sic2l6ZXMiOiIxOTJ4MTkyIiwidHlwZSI6ImltYWdlL3BuZyIsInNyYyI6Imh0dHBzOi8vcGxhY2Vob2xkLmNvLzE5MngxOTIvNDMzOGNhL2ZmZmZmZj90ZXh0PVBXQSJ9LHsic2l6ZXMiOiI1MTJ4NTEyIiwidHlwZSI6ImltYWdlL3BuZyIsInNyYyI6Imh0dHBzOi8vcGxhY2Vob2xkLmNvLzUxMng1MTIvNDMzOGNhL2ZmZmZmZj90ZXh0PVBXQSJ9XSwibmFtZSI6IlBXQSBUYXNrIFRyYWNrZXIiLCJzaG9ydF9uYW1lIjoiVGFzayBQUkEiLCJzdGFydF91cmwiOiIuLyIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiNmOGZhZmMiLCJ0aGVtZV9jb2xvciI6IiMzNzMwYTMifQ==">
     
-    <!-- Minimal Service Worker (Embedded as data URI for single-file deployment) -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                // Register an *almost* empty service worker (required for PWA status on iOS)
                 const swCode = `
                     self.addEventListener('install', () => { console.log('SW installing.'); });
                     self.addEventListener('activate', () => { console.log('SW activating.'); });
@@ -57,27 +55,16 @@
 
     <!-- The Entire React Application Code goes here -->
     <script type="text/babel">
-        // Import all required Firebase modules directly
         const { useState, useEffect, useCallback, useMemo } = React;
-        const { initializeApp } = firebase;
-        const { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } = firebase.auth;
-        const { getFirestore, doc, setDoc, onSnapshot, collection, query, orderBy, serverTimestamp, getDocs, deleteDoc } = firebase.firestore;
         
-        // Ensure Firebase imports are available on window object for older environments
-        if (typeof firebase === 'undefined' || !firebase.firestore || !firebase.auth) {
-            console.error("Firebase SDK not loaded. Check CDN links.");
-        }
-
-
         // --- Global Variable Configuration ---
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         // The database path for public, shared vocabulary lists
+        // Note: Using the collection method from the older SDK style
         const getCollectionPath = (appId) => `/artifacts/${appId}/public/data/vocab_lists`;
-
-        // --- Utility Functions ---
 
         // Function to shuffle an array (Fisher-Yates algorithm)
         const shuffleArray = (array) => {
@@ -94,12 +81,13 @@
         const App = () => {
           // 1. Firebase State
           const [db, setDb] = useState(null);
+          const [auth, setAuth] = useState(null);
           const [userId, setUserId] = useState(null);
           const [isAuthReady, setIsAuthReady] = useState(false);
 
           // 2. App State
           const [vocabLists, setVocabLists] = useState([]);
-          const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' or 'quiz'
+          const [activeView, setActiveView] = useState('dashboard');
           
           // 3. Quiz State
           const [currentList, setCurrentList] = useState(null);
@@ -114,51 +102,53 @@
           const [bulkInput, setBulkInput] = useState('');
 
 
-          // --- FIRESTORE INITIALIZATION & AUTH ---
+          // --- FIRESTORE INITIALIZATION & AUTH (Using stable compat methods) ---
 
           useEffect(() => {
             if (!firebaseConfig || Object.keys(firebaseConfig).length === 0) {
               console.error("Firebase configuration is missing.");
+              setMessage("Error: Firebase config missing.");
               return;
             }
 
             try {
-              // setLogLevel('debug'); // Uncomment for detailed debug logs
-              const app = initializeApp(firebaseConfig);
-              const authInstance = getAuth(app);
-              const dbInstance = getFirestore(app);
+              // 1. Initialize App using the global 'firebase' object (compat method)
+              const app = firebase.initializeApp(firebaseConfig);
+              const authInstance = app.auth(); // Use old compat service accessor
+              const dbInstance = app.firestore(); // Use old compat service accessor
               
               setDb(dbInstance);
+              setAuth(authInstance);
 
-              // 1. Listen for auth state changes
-              const unsubscribe = onAuthStateChanged(authInstance, (user) => {
+              // 2. Listen for auth state changes
+              authInstance.onAuthStateChanged(async (user) => {
                 if (user) {
                   setUserId(user.uid);
                 } else {
-                  // Fallback for anonymous users if sign-in fails or user logs out
-                  setUserId(crypto.randomUUID());
+                  setUserId(null);
                 }
                 setIsAuthReady(true);
               });
 
-              // 2. Sign in or sign up
+              // 3. Sign in
               const handleSignIn = async () => {
                 try {
                   if (initialAuthToken) {
-                    await signInWithCustomToken(authInstance, initialAuthToken);
+                    await authInstance.signInWithCustomToken(initialAuthToken);
                   } else {
-                    // Use anonymous sign-in if no custom token is provided
-                    await signInAnonymously(authInstance);
+                    await authInstance.signInAnonymously();
                   }
                 } catch (error) {
                   console.error("Firebase sign-in failed:", error);
+                  setMessage("Sign-in failed. Check console.");
+                  setIsAuthReady(true); // Still ready to attempt DB ops, but maybe limited
                 }
               };
               
               handleSignIn();
-              return () => unsubscribe(); // Cleanup auth listener
             } catch (error) {
               console.error("Firebase initialization failed:", error);
+              setMessage("Initialization failed. Check console.");
             }
           }, []);
 
@@ -166,28 +156,31 @@
 
           useEffect(() => {
             if (!db || !isAuthReady) {
-              console.log('Waiting for DB or Auth to be ready...');
               return;
             }
 
             // Set up real-time listener for all vocab lists in the public collection
-            const vocabColRef = collection(db, getCollectionPath(appId));
-            const q = query(vocabColRef, orderBy('createdAt', 'desc'));
+            // Using compat query structure: db.collection().orderBy().onSnapshot()
+            const vocabColRef = db.collection(getCollectionPath(appId));
+            const q = vocabColRef.orderBy('createdAt', 'desc');
 
-            const unsubscribe = onSnapshot(q, (snapshot) => {
+            const unsubscribe = q.onSnapshot((snapshot) => {
               const lists = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
               }));
               setVocabLists(lists);
-              setMessage(`Loaded ${lists.length} vocabulary list(s).`);
+              // Only update success message after the first successful load
+              if (lists.length > 0 || message !== "Successfully connected!") {
+                setMessage("Successfully connected!");
+              }
             }, (error) => {
               console.error("Firestore snapshot error:", error);
-              setMessage('Error loading lists: Check console.');
+              setMessage('Error loading lists: Check console (connection still failing).');
             });
 
             return () => unsubscribe(); // Cleanup listener
-          }, [db, isAuthReady, userId]); // Re-run if db or auth state changes
+          }, [db, isAuthReady, userId]);
 
           // --- DATA PROCESSING & SAVING ---
 
@@ -198,14 +191,13 @@
             const cards = [];
 
             lines.forEach((line, index) => {
-              // Normalize line to use colon as a separator for German and English
               const parts = line.split(/[:–-]/).map(p => p.trim()).filter(p => p.length > 0);
               
               if (parts.length >= 2) {
                 cards.push({
                   german: parts[0],
                   english: parts[1],
-                  notes: parts.slice(2).join('; ') || '', // Optional notes/example sentences
+                  notes: parts.slice(2).join('; ') || '',
                   id: `${Date.now()}-${index}`
                 });
               }
@@ -214,7 +206,10 @@
           }, [bulkInput]);
 
           const saveList = async () => {
-            if (!db) return;
+            if (!db || !userId) {
+                setMessage('Database not ready or user not authenticated.');
+                return;
+            }
             if (!listName.trim()) {
               setMessage('Please enter a list name.');
               return;
@@ -226,14 +221,15 @@
               return;
             }
 
-            const newDocRef = doc(collection(db, getCollectionPath(appId)));
+            // Using compat doc reference: db.collection().doc()
+            const newDocRef = db.collection(getCollectionPath(appId)).doc();
             
             try {
-              await setDoc(newDocRef, {
+              await newDocRef.set({
                 name: listName.trim(),
                 cards: cards,
                 cardCount: cards.length,
-                createdAt: serverTimestamp(),
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 userId: userId,
                 createdBy: userId ? userId.substring(0, 8) : 'anonymous',
               });
@@ -248,10 +244,12 @@
           };
 
           const deleteList = async (listId, listName) => {
+            // Using window.confirm instead of alert/confirm
             if (!db || !window.confirm(`Are you sure you want to delete the list: "${listName}"?`)) return;
 
             try {
-              await deleteDoc(doc(db, getCollectionPath(appId), listId));
+              // Using compat delete: db.collection().doc().delete()
+              await db.collection(getCollectionPath(appId)).doc(listId).delete();
               setMessage(`List "${listName}" deleted successfully.`);
             } catch (error) {
               console.error("Failed to delete list:", error);
@@ -282,11 +280,9 @@
           const nextCard = () => {
             setIsFlipped(false);
             
-            // Loop back to the start if we reach the end
             const nextIndex = (currentCardIndex + 1) % shuffledCards.length;
             setCurrentCardIndex(nextIndex);
 
-            // Optional: Re-shuffle when looping
             if (nextIndex === 0 && quizSettings.isRandom) {
                 setShuffledCards(shuffleArray(shuffledCards));
                 setMessage('List completed and re-shuffled!');
@@ -295,7 +291,6 @@
 
           const currentCard = shuffledCards.length > 0 ? shuffledCards[currentCardIndex] : null;
 
-          // Determines which side of the card is visible first
           const primaryTerm = currentCard ? (quizSettings.showGermanFirst ? currentCard.german : currentCard.english) : '...';
           const secondaryTerm = currentCard ? (quizSettings.showGermanFirst ? currentCard.english : currentCard.german) : '...';
 
@@ -323,7 +318,7 @@
                 ></textarea>
                 <button 
                   onClick={saveList}
-                  disabled={!db}
+                  disabled={!db || !userId}
                   className="w-full mt-4 bg-indigo-600 text-white p-3 rounded-lg font-semibold hover:bg-indigo-700 transition duration-150 shadow-md disabled:bg-indigo-300"
                 >
                   {db ? `Save ${parseBulkInput().length} Cards` : 'Connecting to Database...'}
@@ -338,7 +333,7 @@
                   <div key={list.id} className="flex justify-between items-center bg-white p-4 rounded-xl shadow-lg border border-gray-100">
                     <div>
                       <div className="font-semibold text-lg text-gray-800">{list.name}</div>
-                      <div className="text-sm text-gray-500">{list.cardCount || list.cards.length} cards | Created by: {list.createdBy}</div>
+                      <div className="text-sm text-gray-500">{list.cardCount || (list.cards ? list.cards.length : 0)} cards | Created by: {list.createdBy}</div>
                     </div>
                     <div className="flex space-x-2">
                       <button
@@ -364,7 +359,7 @@
           );
 
           const QuizView = () => (
-            <div className="p-4 flex flex-col items-center justify-center min-h-screen-minus-header">
+            <div className="p-4 flex flex-col items-center justify-center min-h-screen">
               {currentList && (
                 <button 
                   onClick={() => setActiveView('dashboard')}
@@ -376,7 +371,7 @@
               )}
 
               {/* Quiz Progress */}
-              <div className="w-full max-w-sm text-center mb-4">
+              <div className="w-full max-w-sm text-center mb-4 mt-12">
                 <p className="text-sm text-gray-600 font-medium">
                   {currentList?.name} | Card {currentCardIndex + 1} of {shuffledCards.length}
                 </p>
@@ -481,8 +476,9 @@
         ReactDOM.render(<App />, document.getElementById('root'));
 
     </script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
+    <!-- IMPORTANT: These Firebase SDKs must be loaded AFTER React/Babel -->
+    <script src="https://www.gstatic.com/firebasejs/7.21.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/7.21.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/7.21.1/firebase-firestore.js"></script>
 </body>
 </html>
