@@ -82,16 +82,27 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, onSnapshot, doc, setDoc, query, serverTimestamp, setLogLevel, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global variables provided by the Canvas environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // --- Firebase Config and Global Variable Handling (Updated for Robustness) ---
         
         let db;
         let auth;
         let userId = null;
         let isAuthReady = false;
 
+        // Safely access and parse global variables
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        let firebaseConfig = {};
+        try {
+            // Check if the config variable exists and is not null/empty string before parsing
+            const rawConfig = typeof __firebase_config !== 'undefined' && __firebase_config ? __firebase_config : '{}';
+            firebaseConfig = JSON.parse(rawConfig);
+        } catch (e) {
+            console.error("CRITICAL ERROR: Failed to parse __firebase_config string into JSON.", e);
+            document.getElementById('auth-status').textContent = "ERROR: Configuration failed to load. Check console.";
+        }
+        
         setLogLevel('debug'); // Helpful for debugging
 
         // --- Utility Functions ---
@@ -113,41 +124,48 @@
 
         // --- Firebase Initialization and Auth ---
 
-        try {
-            const app = initializeApp(firebaseConfig);
-            db = getFirestore(app);
-            auth = getAuth(app);
-            
-            document.getElementById('save-button').disabled = true;
+        if (Object.keys(firebaseConfig).length > 0) {
+             try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                document.getElementById('save-button').disabled = true;
 
-            onAuthStateChanged(auth, async (user) => {
-                const authStatusElement = document.getElementById('auth-status');
-                if (user) {
-                    userId = user.uid;
-                    isAuthReady = true;
-                    authStatusElement.innerHTML = `Connected as User ID: <span class="font-mono text-blue-800">${userId}</span> (Public Data)`;
-                    document.getElementById('save-button').disabled = false;
-                    setupRealtimeListener();
-                } else {
-                    // Attempt sign-in if not yet signed in
-                    try {
-                        if (initialAuthToken) {
-                            await signInWithCustomToken(auth, initialAuthToken);
-                        } else {
-                            await signInAnonymously(auth);
-                        }
-                    } catch (error) {
-                        console.error("Authentication failed:", error);
-                        authStatusElement.textContent = `Error: Could not authenticate. ${error.message}`;
+                onAuthStateChanged(auth, async (user) => {
+                    const authStatusElement = document.getElementById('auth-status');
+                    if (user) {
+                        userId = user.uid;
                         isAuthReady = true;
+                        authStatusElement.innerHTML = `Connected as User ID: <span class="font-mono text-blue-800">${userId}</span> (Public Data)`;
+                        document.getElementById('save-button').disabled = false;
+                        setupRealtimeListener();
+                    } else {
+                        // Attempt sign-in if not yet signed in
+                        try {
+                            if (initialAuthToken) {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        } catch (error) {
+                            console.error("Authentication failed:", error);
+                            authStatusElement.textContent = `Error: Could not authenticate. ${error.message}`;
+                            isAuthReady = true;
+                        }
                     }
-                }
-            });
+                });
 
-        } catch (error) {
-            console.error("Firebase initialization failed:", error);
-            showMessage('Firebase initialization failed. Check your config.', 'error');
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                showMessage(`Firebase initialization failed. Detail: ${error.message}`, 'error');
+            }
+        } else {
+            // This case handles when firebaseConfig was empty due to parsing failure
+            console.error("Firebase Initialization Skipped: Configuration data is missing or invalid.");
+            document.getElementById('auth-status').textContent = "ERROR: Firebase Config is missing or invalid. Check console logs.";
         }
+
 
         // --- Firestore Data Operations ---
 
