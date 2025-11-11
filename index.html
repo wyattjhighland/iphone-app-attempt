@@ -79,33 +79,20 @@
     <!-- Firebase SDK Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, onSnapshot, doc, setDoc, query, serverTimestamp, setLogLevel, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // --- NEW: Import local configuration ---
+        import { firebaseConfig, APP_ID, INITIAL_AUTH_TOKEN } from './config.js'; 
 
-        // --- Firebase Config and Global Variable Handling (Updated for Robustness) ---
+        // --- Firebase Setup ---
         
         let db;
         let auth;
         let userId = null;
         let isAuthReady = false;
 
-        // Safely access and parse global variables
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-        
-        let firebaseConfig = {};
-        try {
-            // Check if the config variable exists and is not null/empty string before parsing
-            const rawConfig = typeof __firebase_config !== 'undefined' && __firebase_config ? __firebase_config : '{}';
-            firebaseConfig = JSON.parse(rawConfig);
-        } catch (e) {
-            console.error("CRITICAL ERROR: Failed to parse __firebase_config string into JSON.", e);
-            document.getElementById('auth-status').textContent = "ERROR: Configuration failed to load. Check console.";
-        }
-        
         setLogLevel('debug'); // Helpful for debugging
-
-        // --- Utility Functions ---
 
         function showMessage(message, type = 'success') {
             const box = document.getElementById('message-box');
@@ -124,7 +111,7 @@
 
         // --- Firebase Initialization and Auth ---
 
-        if (Object.keys(firebaseConfig).length > 0) {
+        if (APP_ID && Object.keys(firebaseConfig).length > 0) {
              try {
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
@@ -141,13 +128,10 @@
                         document.getElementById('save-button').disabled = false;
                         setupRealtimeListener();
                     } else {
-                        // Attempt sign-in if not yet signed in
+                        // On GitHub Pages, we always sign in anonymously since we don't have a custom token
                         try {
-                            if (initialAuthToken) {
-                                await signInWithCustomToken(auth, initialAuthToken);
-                            } else {
-                                await signInAnonymously(auth);
-                            }
+                            await signInAnonymously(auth);
+                            // The onAuthStateChanged listener will fire again with the new user object
                         } catch (error) {
                             console.error("Authentication failed:", error);
                             authStatusElement.textContent = `Error: Could not authenticate. ${error.message}`;
@@ -161,17 +145,16 @@
                 showMessage(`Firebase initialization failed. Detail: ${error.message}`, 'error');
             }
         } else {
-            // This case handles when firebaseConfig was empty due to parsing failure
-            console.error("Firebase Initialization Skipped: Configuration data is missing or invalid.");
-            document.getElementById('auth-status').textContent = "ERROR: Firebase Config is missing or invalid. Check console logs.";
+            console.error("Firebase Initialization Skipped: Configuration data is missing or invalid. Did you update config.js?");
+            document.getElementById('auth-status').textContent = "ERROR: Firebase Config is missing or invalid. Check console logs and ensure config.js is updated.";
         }
 
 
         // --- Firestore Data Operations ---
 
         function getCollectionPath() {
-            // Using the recommended public path for collaboration
-            return `artifacts/${appId}/public/data/vocab_lists`;
+            // Use the APP_ID (which is the projectId in the config.js file)
+            return `artifacts/${APP_ID}/public/data/vocab_lists`;
         }
 
         async function saveList(name, rawWords) {
@@ -220,7 +203,6 @@
             const listRef = doc(db, getCollectionPath(), docId);
 
             try {
-                // IMPORTANT: Use window.confirm instead of plain confirm() for consistency
                 if (window.confirm('Are you sure you want to delete this list?')) {
                     await deleteDoc(listRef);
                     showMessage("List deleted.");
@@ -243,7 +225,7 @@
                 return;
             }
 
-            // Sort by creation time, latest first (since orderBy isn't used)
+            // Sort by creation time, latest first 
             const sortedLists = lists.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
 
             sortedLists.forEach(list => {
@@ -289,7 +271,7 @@
             container.querySelectorAll('.delete-btn').forEach(button => {
                 button.addEventListener('click', (e) => {
                     const docId = e.target.dataset.id;
-                    deleteList(docId); // deleteList now contains the confirmation logic
+                    deleteList(docId); 
                 });
             });
         }

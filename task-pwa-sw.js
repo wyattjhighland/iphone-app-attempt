@@ -1,75 +1,58 @@
-const CACHE_NAME = 'vocab-pwa-cache-v1';
-
-// List of assets (the App Shell) to cache on installation.
-// This includes the HTML, CSS, and all necessary Firebase SDKs and CDNs.
-const CACHE_ASSETS = [
-    '/', // The main HTML file
-    'index.html',
-    'manifest.json',
+const CACHE_NAME = 'vocab-sync-cache-v1';
+const urlsToCache = [
+    './',
+    './index.html',
+    './manifest.json',
+    // We don't cache config.js as it's private, but we must cache the Firebase SDKs if they're used.
     'https://cdn.tailwindcss.com',
     'https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap',
-    // Firebase SDKs (using the exact versions linked in index.html)
-    "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js",
-    "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js",
-    "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"
-    // Placeholder icons are also required for a complete PWA setup, but we omit them for simplicity in this single file environment.
+    'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js',
+    'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js',
+    'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js',
+    'https://placehold.co/192x192/1d4ed8/ffffff?text=VS',
+    'https://placehold.co/512x512/1d4ed8/ffffff?text=VS'
 ];
 
-// --- Install Event: Cache the App Shell ---
 self.addEventListener('install', (event) => {
-    // This phase occurs when the service worker is first registered.
+    // Perform install steps
     event.waitUntil(
         caches.open(CACHE_NAME)
             .then((cache) => {
-                console.log('[ServiceWorker] Caching App Shell assets:', CACHE_ASSETS.length);
-                return cache.addAll(CACHE_ASSETS);
-            })
-            .catch(error => {
-                console.error('[ServiceWorker] Failed to cache assets:', error);
+                console.log('Opened cache and cached core files');
+                return cache.addAll(urlsToCache).catch(error => {
+                    console.error('Failed to cache resources:', error);
+                });
             })
     );
-    self.skipWaiting(); // Forces the waiting service worker to become the active service worker
 });
 
+self.addEventListener('fetch', (event) => {
+    // Serve from cache first, then fall back to network
+    event.respondWith(
+        caches.match(event.request)
+            .then((response) => {
+                // Cache hit - return response
+                if (response) {
+                    return response;
+                }
+                // No cache hit - fetch from network
+                return fetch(event.request);
+            })
+    );
+});
 
-// --- Activate Event: Cleanup Old Caches ---
 self.addEventListener('activate', (event) => {
-    // This phase removes any previous, unused caches to free up storage.
+    // Clean up old caches
+    const cacheWhitelist = [CACHE_NAME];
     event.waitUntil(
         caches.keys().then((cacheNames) => {
             return Promise.all(
                 cacheNames.map((cacheName) => {
-                    if (cacheName !== CACHE_NAME) {
-                        console.log('[ServiceWorker] Deleting old cache:', cacheName);
+                    if (cacheWhitelist.indexOf(cacheName) === -1) {
                         return caches.delete(cacheName);
                     }
                 })
             );
         })
     );
-    return self.clients.claim(); // Ensures the active service worker takes control immediately
-});
-
-
-// --- Fetch Event: Serve from Cache, Fallback to Network ---
-self.addEventListener('fetch', (event) => {
-    // We only want to handle caching for our static App Shell assets.
-    // Firebase data interactions will always need a network connection (or rely on the Firebase SDK's internal persistence).
-    const url = new URL(event.request.url);
-
-    // 1. Check if the request is for one of the cached assets (App Shell)
-    const isAppShellAsset = CACHE_ASSETS.includes(url.pathname) || CACHE_ASSETS.includes(url.href);
-
-    if (isAppShellAsset) {
-        // Cache-First Strategy for App Shell (HTML, CSS, JS libraries)
-        event.respondWith(
-            caches.match(event.request)
-                .then((response) => {
-                    // Return the cached asset if found, otherwise fetch from the network
-                    return response || fetch(event.request);
-                })
-        );
-    } 
-    // 2. Default behavior for all other requests (like Firebase API calls): Network-Only
-    // We let these requests go to the network, as data must be real-time.
 });
