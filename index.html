@@ -3,399 +3,330 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative Vocabulary Lists PWA</title>
-    <!-- PWA: Link to Manifest -->
-    <link rel="manifest" href="manifest.json">
+    <title>Vocabulary List Maker</title>
+    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f7f7f7;
-        }
-        .container {
-            max-width: 900px;
-        }
-        .card {
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-        }
-        /* Custom modal backdrop for deletion confirmation */
-        .modal-backdrop {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
     </style>
+    <!-- Phosphor Icons (for icons like Lists, Add, Share) -->
+    <script src="https://unpkg.com/@phosphor-icons/web@2.0.3"></script>
 </head>
-<body>
-    <div id="app" class="container mx-auto p-4 md:p-8">
-        <header class="text-center mb-10">
-            <h1 class="text-4xl font-extrabold text-blue-700">Collaborative Vocabulary Lists (PWA)</h1>
-            <p class="text-gray-500 mt-2">Create and share word lists in real-time. Installable for offline use!</p>
-            <div id="auth-status" class="mt-4 text-sm font-medium text-gray-600 p-2 bg-gray-100 rounded-lg">
-                Loading user...
-            </div>
+<body class="bg-gray-50 min-h-screen p-4 sm:p-6">
+
+    <div id="app" class="max-w-xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-blue-700">Vocab Weaver</h1>
+            <p class="text-gray-500 mt-1">Create and share collaborative vocabulary lists.</p>
         </header>
 
-        <main class="grid md:grid-cols-3 gap-8">
-            <!-- List Creation Form -->
-            <div class="md:col-span-1 p-6 bg-white rounded-xl card h-fit">
-                <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">New List</h2>
-                <form id="list-form" class="space-y-4">
-                    <div>
-                        <label for="list-name" class="block text-sm font-medium text-gray-700 mb-1">List Name</label>
-                        <input type="text" id="list-name" placeholder="e.g., Week 1 Verbs" required
-                                class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
-                    </div>
-                    <div>
-                        <label for="list-words" class="block text-sm font-medium text-gray-700 mb-1">Words (word:definition, one per line)</label>
-                        <textarea id="list-words" rows="6" placeholder="Serendipity: Fortunate accident&#10;Ephemeral: Lasting for a short time" required
-                                     class="w-full p-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"></textarea>
-                    </div>
-                    <button type="submit" id="save-button"
-                            class="w-full py-2 px-4 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition duration-150 ease-in-out disabled:opacity-50">
-                        Save List
-                    </button>
-                </form>
-                <div id="message-box" class="mt-4 p-3 hidden text-sm rounded-lg" role="alert"></div>
+        <!-- Current User Display -->
+        <div class="mb-4 p-3 bg-white shadow-md rounded-lg text-sm text-gray-600">
+            <p class="font-medium">Your User ID (for sharing):</p>
+            <code id="user-id-display" class="text-xs break-all text-gray-700 bg-gray-100 p-1 rounded-md mt-1 block">Loading...</code>
+        </div>
+        
+        <!-- List Creation Form -->
+        <section class="bg-white p-5 shadow-lg rounded-xl mb-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                <i class="ph-book-bookmark text-blue-500 mr-2"></i> Create New Item
+            </h2>
+            <div class="space-y-4">
+                <input type="text" id="term-input" placeholder="Vocabulary Term (e.g., Ephemeral)" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150">
+                <textarea id="definition-input" placeholder="Definition or Context (e.g., Lasting for a very short time.)" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150 resize-none h-20"></textarea>
+                <button id="add-item-button" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition duration-200 shadow-md">
+                    <i class="ph-plus-circle mr-2"></i> Add Item to List
+                </button>
             </div>
+            <p id="error-message" class="mt-3 text-sm text-red-600 hidden"></p>
+        </section>
 
-            <!-- Display Area -->
-            <div class="md:col-span-2 p-6 bg-white rounded-xl card">
-                <h2 class="text-2xl font-semibold text-gray-800 mb-4 border-b pb-2">All Vocabulary Lists</h2>
-                <div id="lists-container" class="space-y-6">
-                    <!-- Lists will be injected here -->
-                    <p id="loading-indicator" class="text-center text-gray-500">Loading lists...</p>
-                </div>
+        <!-- Lists Display -->
+        <section class="bg-white p-5 shadow-lg rounded-xl">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                <i class="ph-list-checks text-blue-500 mr-2"></i> Your Vocabulary List
+            </h2>
+            <div id="loading-indicator" class="text-center py-6 text-gray-400">
+                <p>Loading list data...</p>
             </div>
-        </main>
+            <div id="vocab-list-container" class="space-y-3">
+                <!-- List items will be rendered here -->
+            </div>
+            <p id="empty-list-message" class="text-center text-gray-400 py-6 hidden">Your list is empty. Add a term above!</p>
+        </section>
     </div>
 
-    <!-- Confirmation Modal (Hidden by default) -->
-    <div id="confirm-modal" class="modal-backdrop hidden">
-        <div class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full mx-4">
-            <h3 class="text-xl font-bold text-gray-800 mb-4">Confirm Deletion</h3>
-            <p id="confirm-message" class="text-gray-600 mb-6">Are you sure you want to delete this list?</p>
-            <div class="flex justify-end space-x-3">
-                <button id="cancel-btn" class="py-2 px-4 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition duration-150">
-                    Cancel
-                </button>
-                <button id="delete-confirm-btn" class="py-2 px-4 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition duration-150">
-                    Delete
-                </button>
-            </div>
+    <!-- Modal/Message Box (for non-alert messages) -->
+    <div id="message-box" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full">
+            <h3 id="message-title" class="text-lg font-bold mb-2 text-gray-800"></h3>
+            <p id="message-content" class="text-sm text-gray-600 mb-4"></p>
+            <button id="message-close-button" class="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition">Close</button>
         </div>
     </div>
 
-
-    <!-- PWA: Service Worker Registration -->
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                // Since service-worker.js is not provided, this line is commented out 
-                // navigator.serviceWorker.register('service-worker.js')
-                // .then(reg => console.log('Service Worker registered successfully:', reg.scope))
-                // .catch(err => console.error('Service Worker registration failed:', err));
-            });
-        }
-    </script>
-
-    <!-- Firebase SDK Imports and App Logic -->
+    <!-- Firebase Imports -->
     <script type="module">
+        // Import Firebase modules
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, doc, setDoc, query, serverTimestamp, setLogLevel, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        
-        // Global variables provided by the Canvas environment
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const INITIAL_AUTH_TOKEN = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, query, addDoc, serverTimestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- Firebase Setup ---
+        // IMPORTANT: The following import attempts to load the configuration from the local config.js file.
+        // If running in the Canvas environment, the subsequent checks using 'typeof __app_id' will overwrite these values.
+        let ExternalConfig = {};
+        try {
+            // Use a dynamic import if not in Canvas environment to avoid module errors in some contexts
+            if (typeof __app_id === 'undefined') {
+                const module = await import('./config.js');
+                ExternalConfig = module;
+                console.log("Configuration successfully loaded from ./config.js.");
+            }
+        } catch (e) {
+            if (typeof __app_id === 'undefined') {
+                console.warn("Could not load ./config.js. Ensure the file exists and is accessible. Proceeding with external defaults.", e.message);
+            }
+        }
         
+        // --- Configuration Variables ---
+        // Prioritize Canvas globals first, then fallback to external config, then to empty defaults.
+        
+        const firebaseConfig = typeof __firebase_config !== 'undefined'
+            ? JSON.parse(__firebase_config)
+            : (ExternalConfig.firebaseConfig || {});
+        
+        const APP_ID = typeof __app_id !== 'undefined'
+            ? __app_id
+            : (ExternalConfig.APP_ID || 'default-app-id');
+
+        const INITIAL_AUTH_TOKEN = typeof __initial_auth_token !== 'undefined'
+            ? __initial_auth_token
+            : (ExternalConfig.INITIAL_AUTH_TOKEN || null);
+            
+        // --- Firebase Initialization ---
+
+        let app;
         let db;
         let auth;
         let userId = null;
         let isAuthReady = false;
 
-        setLogLevel('debug'); // Helpful for debugging
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const listContainer = document.getElementById('vocab-list-container');
+        const emptyMessage = document.getElementById('empty-list-message');
+        const userIdDisplay = document.getElementById('user-id-display');
+        const termInput = document.getElementById('term-input');
+        const definitionInput = document.getElementById('definition-input');
+        const addItemButton = document.getElementById('add-item-button');
+        const errorMessage = document.getElementById('error-message');
 
-        function showMessage(message, type = 'success') {
-            const box = document.getElementById('message-box');
-            box.textContent = message;
-            box.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-green-100', 'text-green-700');
-            if (type === 'error') {
-                box.classList.add('bg-red-100', 'text-red-700');
-            } else {
-                box.classList.add('bg-green-100', 'text-green-700');
-            }
-            setTimeout(() => { box.classList.add('hidden'); }, 5000);
+        // Helper for custom modal message box
+        function showMessage(title, content) {
+            document.getElementById('message-title').textContent = title;
+            document.getElementById('message-content').textContent = content;
+            document.getElementById('message-box').classList.remove('hidden');
         }
 
-        function generateUniqueId() {
-            // Using crypto.randomUUID for better uniqueness when available
-            return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).substring(2);
+        document.getElementById('message-close-button').addEventListener('click', () => {
+            document.getElementById('message-box').classList.add('hidden');
+        });
+
+        // Error handling function
+        function displayError(message) {
+            console.error(message);
+            errorMessage.textContent = message;
+            errorMessage.classList.remove('hidden');
+            setTimeout(() => errorMessage.classList.add('hidden'), 5000);
         }
 
-        // --- Confirmation Modal Logic ---
-        function showConfirmModal(message) {
-            return new Promise((resolve) => {
-                const modal = document.getElementById('confirm-modal');
-                const confirmMessage = document.getElementById('confirm-message');
-                const cancelBtn = document.getElementById('cancel-btn');
-                const deleteConfirmBtn = document.getElementById('delete-confirm-btn');
+        // --- Core Application Logic ---
 
-                confirmMessage.textContent = message;
-                modal.classList.remove('hidden');
-
-                const handleConfirm = () => {
-                    modal.classList.add('hidden');
-                    resolve(true);
-                    cleanUpListeners();
-                };
-
-                const handleCancel = () => {
-                    modal.classList.add('hidden');
-                    resolve(false);
-                    cleanUpListeners();
-                };
-
-                // Use a fresh set of event listeners for each modal presentation
-                deleteConfirmBtn.addEventListener('click', handleConfirm, { once: true });
-                cancelBtn.addEventListener('click', handleCancel, { once: true });
-                
-                const cleanUpListeners = () => {
-                    // This is slightly tricky with 'once: true', but it ensures we don't accidentally attach multiple listeners.
-                    // The 'once' option handles the cleanup after a click, making manual removal mostly unnecessary here.
-                    // However, we must ensure if the promise resolves in another way (e.g., external logic, though unlikely here)
-                    // that listeners are still removed. Sticking to 'once: true' is robust enough for this context.
-                };
-
-                // Add keyboard listener for ESC key
-                const escapeListener = (e) => {
-                    if (e.key === "Escape") {
-                        handleCancel();
-                        document.removeEventListener('keydown', escapeListener);
-                    }
-                };
-                document.addEventListener('keydown', escapeListener, { once: true });
-            });
-        }
-
-        // --- Firebase Initialization and Auth ---
-
-        if (APP_ID && Object.keys(firebaseConfig).length > 0) {
-             try {
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                
-                document.getElementById('save-button').disabled = true;
-
-                onAuthStateChanged(auth, async (user) => {
-                    const authStatusElement = document.getElementById('auth-status');
-                    if (user) {
-                        userId = user.uid;
-                        isAuthReady = true;
-                        authStatusElement.innerHTML = `Connected as User ID: <span class="font-mono text-blue-800">${userId}</span> (Public Data)`;
-                        document.getElementById('save-button').disabled = false;
-                        setupRealtimeListener();
-                    } else {
-                        try {
-                            if (INITIAL_AUTH_TOKEN) {
-                                await signInWithCustomToken(auth, INITIAL_AUTH_TOKEN);
-                            } else {
-                                await signInAnonymously(auth);
-                            }
-                            // The onAuthStateChanged listener will fire again with the new user object
-                        } catch (error) {
-                            console.error("Authentication failed:", error);
-                            authStatusElement.textContent = `Error: Could not authenticate. ${error.message}`;
-                            isAuthReady = true;
-                        }
-                    }
-                });
-
-             } catch (error) {
-                console.error("Firebase initialization failed:", error);
-                showMessage(`Firebase initialization failed. Detail: ${error.message}`, 'error');
-             }
-        } else {
-            console.error("Firebase Initialization Skipped: Configuration data is missing or invalid.");
-            document.getElementById('auth-status').textContent = "ERROR: Firebase Config is missing or invalid. Check console logs.";
-        }
-
-
-        // --- Firestore Data Operations ---
-
-        function getCollectionPath() {
-            // Using the global APP_ID for public data path
-            return `artifacts/${APP_ID}/public/data/vocab_lists`;
-        }
-
-        async function saveList(name, rawWords) {
-            if (!isAuthReady || !userId) {
-                showMessage("Authentication not ready. Cannot save.", 'error');
+        async function initializeFirebase() {
+            setLogLevel('debug');
+            
+            if (Object.keys(firebaseConfig).length === 0) {
+                const errorMsg = "FATAL ERROR: Firebase configuration is missing or invalid. Check your config.js or Canvas environment variables.";
+                displayError(errorMsg);
+                console.log(errorMsg);
+                loadingIndicator.textContent = "Error: Configuration missing. Cannot connect to Firebase.";
                 return;
             }
-
-            const docId = generateUniqueId();
-            const listRef = doc(db, getCollectionPath(), docId);
 
             try {
-                // Parse words into an array of objects
-                const words = rawWords.split('\n')
-                    .map(line => {
-                        const parts = line.split(':').map(p => p.trim());
-                        return parts.length >= 2 ? { word: parts[0], definition: parts[1] } : null;
-                    })
-                    .filter(item => item !== null);
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
 
-                if (words.length === 0) {
-                    showMessage("Please format your words correctly (word:definition, one per line).", 'error');
-                    return;
-                }
+                // Authentication
+                await new Promise((resolve) => {
+                    // Use onAuthStateChanged to ensure we get a final state after any sign-in attempt
+                    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+                        unsubscribe(); // Stop listening after the first event
+                        
+                        if (user) {
+                            userId = user.uid;
+                        } else {
+                            if (INITIAL_AUTH_TOKEN) {
+                                // Sign in with custom token provided by Canvas
+                                const userCredential = await signInWithCustomToken(auth, INITIAL_AUTH_TOKEN);
+                                userId = userCredential.user.uid;
+                            } else {
+                                // Sign in anonymously for external use (GitHub Pages)
+                                const userCredential = await signInAnonymously(auth);
+                                userId = userCredential.user.uid;
+                            }
+                        }
+                        
+                        // Fallback in case of anonymous sign-in failure, though highly unlikely
+                        if (!userId) {
+                            userId = crypto.randomUUID(); // Temporary non-authenticated ID
+                        }
 
-                const listData = {
-                    name: name,
-                    words: words, // Array of {word, definition} objects
-                    ownerId: userId,
-                    createdAt: serverTimestamp(),
-                };
+                        isAuthReady = true;
+                        userIdDisplay.textContent = userId;
+                        resolve();
+                    });
+                });
 
-                await setDoc(listRef, listData);
-                showMessage(`List "${name}" saved successfully!`);
-                document.getElementById('list-form').reset(); // Clear form on success
+                // Start data listener after authentication
+                startListListener();
 
-            } catch (e) {
-                console.error("Error adding document: ", e);
-                showMessage(`Failed to save list: ${e.message}`, 'error');
+            } catch (error) {
+                const errorMsg = "Firebase initialization failed. Check your network or configuration: " + error.message;
+                displayError(errorMsg);
+                loadingIndicator.textContent = "Error: Failed to connect to Firebase.";
             }
         }
 
-        async function deleteList(docId) {
-            if (!isAuthReady || !userId) return;
-
-            const confirmed = await showConfirmModal('Are you sure you want to permanently delete this list?');
-
-            if (confirmed) {
-                const listRef = doc(db, getCollectionPath(), docId);
-                try {
-                    await deleteDoc(listRef);
-                    showMessage("List deleted successfully.");
-                } catch (e) {
-                    console.error("Error deleting document: ", e);
-                    showMessage(`Failed to delete list: ${e.message}`, 'error');
-                }
-            } else {
-                showMessage("Deletion canceled.");
-            }
+        // Firestore paths
+        // Store user data privately under /artifacts/{appId}/users/{userId}/vocabItems
+        function getCollectionRef() {
+            if (!db || !userId) return null;
+            return collection(db, 'artifacts', APP_ID, 'users', userId, 'vocabItems');
         }
 
-        function renderLists(lists) {
-            const container = document.getElementById('lists-container');
+        // Renders the list of vocabulary items
+        function renderLists(items) {
+            listContainer.innerHTML = '';
             
-            // FIX: The loading indicator is a child of the container. 
-            // Clearing innerHTML removes the indicator, so the subsequent 
-            // document.getElementById('loading-indicator').style.display = 'none'; 
-            // is redundant and causes the 'null' error. We just clear the container.
-            container.innerHTML = ''; 
+            // Hide loading and empty messages
+            loadingIndicator.classList.add('hidden');
+            emptyMessage.classList.add('hidden');
 
-            if (lists.length === 0) {
-                container.innerHTML = '<p class="text-center text-gray-500">No lists found. Create the first one!</p>';
+            if (items.length === 0) {
+                emptyMessage.classList.remove('hidden');
                 return;
             }
 
-            // Sort by creation time, latest first 
-            const sortedLists = lists.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+            // Sort by creation time (newest first)
+            items.sort((a, b) => b.timestamp - a.timestamp);
 
-            sortedLists.forEach(list => {
-                const listElement = document.createElement('div');
-                listElement.id = `list-${list.id}`;
-                listElement.className = 'p-5 border border-gray-200 rounded-xl bg-gray-50 hover:bg-gray-100 transition duration-100';
-
-                let wordsHtml = list.words.map(item =>
-                    `<div class="flex justify-between border-b border-gray-200 py-1">
-                        <span class="font-medium text-gray-800">${item.word}</span>
-                        <span class="text-gray-600 italic text-right ml-4">${item.definition}</span>
-                    </div>`
-                ).join('');
-
-                const isOwner = userId === list.ownerId;
-                // Full User ID is displayed in the auth status, truncate here for card neatness
-                const ownerText = list.ownerId ? `User: ${list.ownerId.substring(0, 8)}...` : 'Unknown'; 
-                const dateText = list.createdAt ? new Date(list.createdAt.seconds * 1000).toLocaleDateString() : 'N/A';
-
-                listElement.innerHTML = `
-                    <div class="flex justify-between items-start mb-3">
-                        <h3 class="text-xl font-bold text-blue-600">${list.name}</h3>
-                        ${isOwner ? 
-                            `<button data-id="${list.id}" class="delete-btn py-1 px-3 bg-red-100 text-red-700 hover:bg-red-200 rounded-lg text-sm font-semibold transition duration-150">
-                                Delete
-                            </button>` 
-                            : ''
-                        }
+            items.forEach(item => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'bg-gray-50 p-4 border border-gray-200 rounded-lg shadow-sm flex justify-between items-start transition duration-150 hover:shadow-md';
+                itemDiv.innerHTML = `
+                    <div class="flex-1 min-w-0">
+                        <h3 class="text-lg font-bold text-gray-900">${item.term}</h3>
+                        <p class="text-sm text-gray-600 mt-1">${item.definition}</p>
+                        <p class="text-xs text-gray-400 mt-2">Added: ${new Date(item.timestamp).toLocaleString()}</p>
                     </div>
-                    
-                    <div class="mb-3 text-xs text-gray-500">
-                        Created by: ${ownerText} | On: ${dateText}
-                    </div>
-                    
-                    <div class="bg-white p-3 rounded-lg border border-gray-100 max-h-48 overflow-y-auto space-y-1">
-                        ${wordsHtml}
-                    </div>
+                    <button data-id="${item.id}" class="delete-btn flex-shrink-0 ml-4 p-2 text-red-500 hover:text-red-700 transition duration-150">
+                        <i class="ph-trash-simple text-xl"></i>
+                    </button>
                 `;
-
-                container.appendChild(listElement);
+                listContainer.appendChild(itemDiv);
             });
 
-            // Attach delete listeners
-            container.querySelectorAll('.delete-btn').forEach(button => {
+            // Attach event listeners to delete buttons
+            document.querySelectorAll('.delete-btn').forEach(button => {
                 button.addEventListener('click', (e) => {
-                    // Use closest to ensure we get the button even if a child element is clicked
-                    const btn = e.target.closest('.delete-btn');
-                    if(btn) {
-                        const docId = btn.dataset.id;
-                        deleteList(docId); 
-                    }
+                    const id = e.currentTarget.getAttribute('data-id');
+                    handleDelete(id);
                 });
             });
         }
 
+        // Real-time listener for Firestore
+        function startListListener() {
+            const listRef = getCollectionRef();
+            if (!listRef) {
+                displayError("Cannot start listener: Firebase not initialized or User ID missing.");
+                return;
+            }
 
-        function setupRealtimeListener() {
-            if (!isAuthReady || !db) return;
-
-            const vocabCollection = collection(db, getCollectionPath());
-            const q = query(vocabCollection);
-
-            onSnapshot(q, (snapshot) => {
-                const lists = [];
+            onSnapshot(listRef, (snapshot) => {
+                const items = [];
                 snapshot.forEach(doc => {
-                    lists.push({ id: doc.id, ...doc.data() });
+                    const data = doc.data();
+                    items.push({
+                        id: doc.id,
+                        term: data.term,
+                        definition: data.definition,
+                        // Convert Firestore Timestamp to JS timestamp if present
+                        timestamp: data.timestamp ? data.timestamp.toMillis() : Date.now(), 
+                    });
                 });
-                renderLists(lists);
+                renderLists(items);
             }, (error) => {
-                console.error("Error getting real-time data: ", error);
-                document.getElementById('lists-container').innerHTML = `<p class="text-red-500">Error loading data: ${error.message}. Please check security rules.</p>`;
+                displayError("Error fetching data from Firestore: " + error.message);
+                loadingIndicator.textContent = "Error loading data.";
             });
         }
 
-        // --- Event Listener ---
+        // Add item functionality
+        addItemButton.addEventListener('click', async () => {
+            const term = termInput.value.trim();
+            const definition = definitionInput.value.trim();
 
-        document.getElementById('list-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const name = document.getElementById('list-name').value;
-            const words = document.getElementById('list-words').value;
-            saveList(name, words);
+            if (!term || !definition) {
+                displayError("Both term and definition are required.");
+                return;
+            }
+            
+            const listRef = getCollectionRef();
+            if (!listRef) {
+                displayError("Application not ready. Please wait for Firebase initialization.");
+                return;
+            }
+
+            try {
+                await addDoc(listRef, {
+                    term: term,
+                    definition: definition,
+                    timestamp: serverTimestamp()
+                });
+                
+                // Clear inputs on success
+                termInput.value = '';
+                definitionInput.value = '';
+                errorMessage.classList.add('hidden');
+
+            } catch (error) {
+                displayError("Failed to add item: " + error.message);
+            }
         });
+
+        // Delete item functionality
+        async function handleDelete(itemId) {
+            const listRef = getCollectionRef();
+            if (!listRef) {
+                displayError("Application not ready. Cannot delete item.");
+                return;
+            }
+
+            try {
+                const itemDocRef = doc(listRef, itemId);
+                await deleteDoc(itemDocRef);
+            } catch (error) {
+                displayError("Failed to delete item: " + error.message);
+            }
+        }
+        
+        // Start the application
+        initializeFirebase();
 
     </script>
 </body>
