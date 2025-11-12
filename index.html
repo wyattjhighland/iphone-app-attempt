@@ -8,8 +8,6 @@
     <!-- PWA & Mobile Configuration START -->
     <link rel="manifest" href="./manifest.json">
     <meta name="theme-color" content="#2563eb">
-    
-    <!-- iOS Specific PWA Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="apple-touch-icon" href="app-icon-192.png">
@@ -33,12 +31,31 @@
             <p class="text-gray-500 mt-1">Create and share collaborative vocabulary lists.</p>
         </header>
 
-        <!-- Current User Display -->
-        <div class="mb-4 p-3 bg-white shadow-md rounded-lg text-sm text-gray-600">
-            <p class="font-medium">Your User ID (for sharing):</p>
-            <code id="user-id-display" class="text-xs break-all text-gray-700 bg-gray-100 p-1 rounded-md mt-1 block">Loading...</code>
-        </div>
-        
+        <!-- Current List Display / Public Key Input -->
+        <section class="mb-6 p-5 bg-white shadow-lg rounded-xl border-t-4 border-blue-500">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                <i class="ph-key text-blue-500 mr-2"></i> List Access Key
+            </h2>
+            <div id="current-list-display" class="mb-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-800 font-medium">
+                Viewing List: <span id="list-name-display" class="font-bold">Loading Personal List...</span>
+            </div>
+            
+            <div class="space-y-3">
+                <input type="text" id="list-name-input" placeholder="Type a List Name (e.g., 'Physics 101')" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition duration-150">
+                <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3">
+                    <button id="load-list-button" class="flex-1 bg-green-500 text-white font-bold py-3 rounded-lg hover:bg-green-600 transition duration-200 shadow-md">
+                        <i class="ph-download-simple mr-2"></i> Load Shared List
+                    </button>
+                    <button id="save-list-button" class="flex-1 bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition duration-200 shadow-md">
+                        <i class="ph-share-network mr-2"></i> Save/Share My List
+                    </button>
+                </div>
+                <button id="reset-list-button" class="w-full bg-gray-300 text-gray-700 font-bold py-3 rounded-lg hover:bg-gray-400 transition duration-200 shadow-sm">
+                    <i class="ph-arrow-counter-clockwise mr-2"></i> Reset to Personal List
+                </button>
+            </div>
+        </section>
+
         <!-- List Creation Form -->
         <section class="bg-white p-5 shadow-lg rounded-xl mb-6">
             <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
@@ -57,7 +74,7 @@
         <!-- Lists Display -->
         <section class="bg-white p-5 shadow-lg rounded-xl">
             <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                <i class="ph-list-checks text-blue-500 mr-2"></i> Your Vocabulary List
+                <i class="ph-list-checks text-blue-500 mr-2"></i> Current List Items
             </h2>
             <div id="loading-indicator" class="text-center py-6 text-gray-400">
                 <p>Loading list data...</p>
@@ -81,30 +98,25 @@
     <!-- Firebase Imports -->
     <script type="module">
         // Import Firebase modules
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, query, addDoc, serverTimestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // Import getDoc for checking public list existence
+        import { getFirestore, doc, setDoc, onSnapshot, collection, getDoc, addDoc, serverTimestamp, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // IMPORTANT: The following import attempts to load the configuration from the local config.js file.
-        // If running in the Canvas environment, the subsequent checks using 'typeof __app_id' will overwrite these values.
         let ExternalConfig = {};
         try {
-            // Use a dynamic import if not in Canvas environment to avoid module errors in some contexts
             if (typeof __app_id === 'undefined') {
                 const module = await import('./config.js');
                 ExternalConfig = module;
-                console.log("Configuration successfully loaded from ./config.js.");
             }
         } catch (e) {
             if (typeof __app_id === 'undefined') {
-                console.warn("Could not load ./config.js. Ensure the file exists and is accessible. Proceeding with external defaults.", e.message);
+                console.warn("Could not load ./config.js. Proceeding with external defaults.", e.message);
             }
         }
         
         // --- Configuration Variables ---
-        // Prioritize Canvas globals first, then fallback to external config, then to empty defaults.
-        
         const firebaseConfig = typeof __firebase_config !== 'undefined'
             ? JSON.parse(__firebase_config)
             : (ExternalConfig.firebaseConfig || {});
@@ -117,18 +129,24 @@
             ? __initial_auth_token
             : (ExternalConfig.INITIAL_AUTH_TOKEN || null);
             
-        // --- Firebase Initialization ---
-
+        // --- Firebase State Variables ---
         let app;
         let db;
         let auth;
-        let userId = null;
-        let isAuthReady = false;
+        let personalUserId = null; // The UID assigned to the current user (persistent)
+        let currentListUid = null;  // The UID of the list currently being viewed/edited
+        let currentListName = 'My Personal List';
+        let unsubscribeSnapshot = null; // To hold and clear the Firestore listener
 
+        // --- DOM Elements ---
         const loadingIndicator = document.getElementById('loading-indicator');
         const listContainer = document.getElementById('vocab-list-container');
         const emptyMessage = document.getElementById('empty-list-message');
-        const userIdDisplay = document.getElementById('user-id-display');
+        const listNameInput = document.getElementById('list-name-input');
+        const listNameDisplay = document.getElementById('list-name-display');
+        const loadListButton = document.getElementById('load-list-button');
+        const saveListButton = document.getElementById('save-list-button');
+        const resetListButton = document.getElementById('reset-list-button');
         const termInput = document.getElementById('term-input');
         const definitionInput = document.getElementById('definition-input');
         const addItemButton = document.getElementById('add-item-button');
@@ -152,78 +170,74 @@
             errorMessage.classList.remove('hidden');
             setTimeout(() => errorMessage.classList.add('hidden'), 5000);
         }
+        
+        // --- PATH HELPERS ---
 
-        // --- Core Application Logic ---
+        // Gets the reference to the vocabulary items collection for the current list UID
+        function getVocabCollectionRef(uid) {
+            if (!db || !uid) return null;
+            // Private data storage under the specific UID
+            return collection(db, 'artifacts', APP_ID, 'users', uid, 'vocabItems');
+        }
 
-        async function initializeFirebase() {
-            setLogLevel('debug');
-            
-            if (Object.keys(firebaseConfig).length === 0) {
-                const errorMsg = "FATAL ERROR: Firebase configuration is missing or invalid. Check your config.js or Canvas environment variables.";
-                displayError(errorMsg);
-                console.log(errorMsg);
-                loadingIndicator.textContent = "Error: Configuration missing. Cannot connect to Firebase.";
+        // Gets the document reference for a public list pointer
+        // Uses a public collection: /artifacts/{appId}/public/data/list_pointers
+        function getListPointerDocRef(name) {
+            if (!db) return null;
+            // We use encodeURIComponent to ensure the name can safely be a Firestore Document ID
+            const safeName = encodeURIComponent(name.trim().toLowerCase());
+            return doc(db, 'artifacts', APP_ID, 'public', 'data', 'list_pointers', safeName);
+        }
+
+
+        // --- LISTENER AND DATA FLOW ---
+
+        // Switches the app to view a different list (either personal or shared)
+        function switchToList(uid, name) {
+            if (!db || !uid) return;
+
+            // 1. Clear any existing listener
+            if (unsubscribeSnapshot) {
+                unsubscribeSnapshot();
+            }
+
+            // 2. Update state and UI
+            currentListUid = uid;
+            currentListName = name;
+            listNameDisplay.textContent = name;
+            loadingIndicator.classList.remove('hidden'); // Show loading when switching
+
+            // 3. Set up new listener
+            const listRef = getVocabCollectionRef(currentListUid);
+            if (!listRef) {
+                displayError("Failed to switch list: Invalid reference.");
                 return;
             }
 
-            try {
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                // Authentication
-                await new Promise((resolve) => {
-                    // Use onAuthStateChanged to ensure we get a final state after any sign-in attempt
-                    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-                        unsubscribe(); // Stop listening after the first event
-                        
-                        if (user) {
-                            userId = user.uid;
-                        } else {
-                            if (INITIAL_AUTH_TOKEN) {
-                                // Sign in with custom token provided by Canvas
-                                const userCredential = await signInWithCustomToken(auth, INITIAL_AUTH_TOKEN);
-                                userId = userCredential.user.uid;
-                            } else {
-                                // Sign in anonymously for external use (GitHub Pages)
-                                const userCredential = await signInAnonymously(auth);
-                                userId = userCredential.user.uid;
-                            }
-                        }
-                        
-                        // Fallback in case of anonymous sign-in failure, though highly unlikely
-                        if (!userId) {
-                            userId = crypto.randomUUID(); // Temporary non-authenticated ID
-                        }
-
-                        isAuthReady = true;
-                        userIdDisplay.textContent = userId;
-                        resolve();
+            unsubscribeSnapshot = onSnapshot(listRef, (snapshot) => {
+                const items = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    items.push({
+                        id: doc.id,
+                        term: data.term,
+                        definition: data.definition,
+                        timestamp: data.timestamp ? data.timestamp.toMillis() : Date.now(), 
                     });
                 });
-
-                // Start data listener after authentication
-                startListListener();
-
-            } catch (error) {
-                const errorMsg = "Firebase initialization failed. Check your network or configuration: " + error.message;
-                displayError(errorMsg);
-                loadingIndicator.textContent = "Error: Failed to connect to Firebase.";
-            }
+                renderLists(items);
+            }, (error) => {
+                displayError("Error fetching data for list: " + error.message);
+                loadingIndicator.textContent = "Error loading data.";
+            });
         }
 
-        // Firestore paths
-        // Store user data privately under /artifacts/{appId}/users/{userId}/vocabItems
-        function getCollectionRef() {
-            if (!db || !userId) return null;
-            return collection(db, 'artifacts', APP_ID, 'users', userId, 'vocabItems');
-        }
 
+        // --- UI & EVENT HANDLERS ---
+        
         // Renders the list of vocabulary items
         function renderLists(items) {
             listContainer.innerHTML = '';
-            
-            // Hide loading and empty messages
             loadingIndicator.classList.add('hidden');
             emptyMessage.classList.add('hidden');
 
@@ -232,7 +246,6 @@
                 return;
             }
 
-            // Sort by creation time (newest first)
             items.sort((a, b) => b.timestamp - a.timestamp);
 
             items.forEach(item => {
@@ -243,46 +256,22 @@
                         <h3 class="text-lg font-bold text-gray-900">${item.term}</h3>
                         <p class="text-sm text-gray-600 mt-1">${item.definition}</p>
                     </div>
-                    <button data-id="${item.id}" class="delete-btn flex-shrink-0 ml-4 p-2 text-red-500 hover:text-red-700 transition duration-150">
-                        <i class="ph-trash-simple text-xl"></i>
-                    </button>
+                    <!-- Delete button is only shown if the current user is the owner of the list -->
+                    ${currentListUid === personalUserId ? `
+                        <button data-id="${item.id}" class="delete-btn flex-shrink-0 ml-4 p-2 text-red-500 hover:text-red-700 transition duration-150">
+                            <i class="ph-trash-simple text-xl"></i>
+                        </button>
+                    ` : ''}
                 `;
                 listContainer.appendChild(itemDiv);
             });
 
-            // Attach event listeners to delete buttons
+            // Attach event listeners to delete buttons only if visible
             document.querySelectorAll('.delete-btn').forEach(button => {
                 button.addEventListener('click', (e) => {
                     const id = e.currentTarget.getAttribute('data-id');
                     handleDelete(id);
                 });
-            });
-        }
-
-        // Real-time listener for Firestore
-        function startListListener() {
-            const listRef = getCollectionRef();
-            if (!listRef) {
-                displayError("Cannot start listener: Firebase not initialized or User ID missing.");
-                return;
-            }
-
-            onSnapshot(listRef, (snapshot) => {
-                const items = [];
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    items.push({
-                        id: doc.id,
-                        term: data.term,
-                        definition: data.definition,
-                        // Convert Firestore Timestamp to JS timestamp if present
-                        timestamp: data.timestamp ? data.timestamp.toMillis() : Date.now(), 
-                    });
-                });
-                renderLists(items);
-            }, (error) => {
-                displayError("Error fetching data from Firestore: " + error.message);
-                loadingIndicator.textContent = "Error loading data.";
             });
         }
 
@@ -296,7 +285,7 @@
                 return;
             }
             
-            const listRef = getCollectionRef();
+            const listRef = getVocabCollectionRef(currentListUid);
             if (!listRef) {
                 displayError("Application not ready. Please wait for Firebase initialization.");
                 return;
@@ -309,7 +298,6 @@
                     timestamp: serverTimestamp()
                 });
                 
-                // Clear inputs on success
                 termInput.value = '';
                 definitionInput.value = '';
                 errorMessage.classList.add('hidden');
@@ -321,17 +309,135 @@
 
         // Delete item functionality
         async function handleDelete(itemId) {
-            const listRef = getCollectionRef();
-            if (!listRef) {
-                displayError("Application not ready. Cannot delete item.");
+            // Check again if current user is the owner before deleting
+            if (currentListUid !== personalUserId) {
+                showMessage("Permission Denied", "You can only delete items from your own list.");
                 return;
             }
+            
+            const listRef = getVocabCollectionRef(currentListUid);
 
             try {
                 const itemDocRef = doc(listRef, itemId);
                 await deleteDoc(itemDocRef);
             } catch (error) {
                 displayError("Failed to delete item: " + error.message);
+            }
+        }
+        
+        // --- LIST SWITCHING LOGIC ---
+
+        // Handler for loading a shared list via name
+        loadListButton.addEventListener('click', async () => {
+            const name = listNameInput.value.trim();
+            if (name.length < 3) {
+                showMessage("Input Error", "The list name must be at least 3 characters long.");
+                return;
+            }
+
+            const pointerRef = getListPointerDocRef(name);
+            
+            try {
+                const docSnap = await getDoc(pointerRef);
+
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    if (data.ownerUid) {
+                        switchToList(data.ownerUid, name);
+                        showMessage("Success!", `Switched to shared list: ${name}`);
+                    } else {
+                        displayError("List pointer found but UID is missing.");
+                    }
+                } else {
+                    showMessage("Not Found", `No public list found with the key: "${name}"`);
+                }
+            } catch (error) {
+                displayError("Failed to load list: " + error.message);
+            }
+        });
+
+        // Handler for saving/sharing the current personal list
+        saveListButton.addEventListener('click', async () => {
+            const name = listNameInput.value.trim();
+            if (name.length < 3) {
+                showMessage("Input Error", "The share name must be at least 3 characters long.");
+                return;
+            }
+
+            const pointerRef = getListPointerDocRef(name);
+
+            try {
+                // Set the pointer in the public collection
+                await setDoc(pointerRef, {
+                    ownerUid: personalUserId,
+                    created: serverTimestamp()
+                });
+
+                // Immediately switch to viewing the shared list (which is the same data)
+                switchToList(personalUserId, name);
+                showMessage("List Shared!", `Your list is now publically accessible using the key: ${name}`);
+            } catch (error) {
+                displayError("Failed to share list: " + error.message);
+            }
+        });
+        
+        // Handler for resetting to the persistent, private list
+        resetListButton.addEventListener('click', () => {
+            switchToList(personalUserId, 'My Personal List');
+            listNameInput.value = '';
+            showMessage("Reset Complete", "You are now viewing your private, persistent list.");
+        });
+
+
+        // --- FIREBASE INITIALIZATION ---
+
+        async function initializeFirebase() {
+            setLogLevel('debug');
+            
+            if (Object.keys(firebaseConfig).length === 0) {
+                loadingIndicator.textContent = "Error: Configuration missing. Cannot connect to Firebase.";
+                return;
+            }
+
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // Authentication and Persistence
+                await new Promise((resolve) => {
+                    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+                        unsubscribe(); 
+                        
+                        if (user) {
+                            personalUserId = user.uid;
+                        } else {
+                            if (INITIAL_AUTH_TOKEN) {
+                                const userCredential = await signInWithCustomToken(auth, INITIAL_AUTH_TOKEN);
+                                personalUserId = userCredential.user.uid;
+                            } else {
+                                // Ensure anonymous sign-in persists across refreshes/PWA sessions
+                                await setPersistence(auth, browserLocalPersistence); 
+                                const userCredential = await signInAnonymously(auth);
+                                personalUserId = userCredential.user.uid;
+                            }
+                        }
+                        
+                        if (!personalUserId) {
+                             // This is a last resort fallback, should not happen if auth is successful
+                             personalUserId = crypto.randomUUID(); 
+                        }
+
+                        // After auth is complete, load the default personal list
+                        switchToList(personalUserId, 'My Personal List');
+                        resolve();
+                    });
+                });
+
+            } catch (error) {
+                const errorMsg = "Firebase initialization failed: " + error.message;
+                displayError(errorMsg);
+                loadingIndicator.textContent = "Error: Failed to connect to Firebase.";
             }
         }
         
