@@ -224,7 +224,8 @@
             loadingListsIndicator.classList.remove('hidden');
 
             const listsRef = getUserListsCollectionRef(userKey);
-            if (!listsRef) {
+            // CRITICAL CHECK: if db failed initialization, this will be null and prevent Firestore error
+            if (!listsRef) { 
                  displayError("Cannot start list listener: Database not ready or user key missing. Please report this error.");
                  return;
             }
@@ -382,18 +383,27 @@
             try {
                 startAppButton.disabled = true;
                 startAppButton.textContent = "Connecting...";
-                await firebaseInitPromise; 
+                
+                // Wait for the initialization status object
+                const initStatus = await firebaseInitPromise; 
+
+                // CRITICAL CHECK: Ensure initialization was successful
+                if (!initStatus.success || !db) { 
+                    nameErrorMessage.textContent = initStatus.message || "FATAL: Database connection failed. Please refresh the page.";
+                    nameErrorMessage.classList.remove('hidden');
+                    return; // Stop execution if initialization failed
+                }
+                
             } catch (error) {
                 nameErrorMessage.textContent = "FATAL: Connection failed. Please check console.";
                 nameErrorMessage.classList.remove('hidden');
+                return;
+            } finally {
+                // This ensures the button is re-enabled even on failure if we don't return early
                 startAppButton.disabled = false;
                 startAppButton.textContent = "Start Managing Lists";
-                return;
             }
             
-            startAppButton.textContent = "Start Managing Lists";
-            startAppButton.disabled = false;
-
             userName = safeName; 
             currentUserDisplay.textContent = rawName; 
             localStorage.setItem('lastUserName', rawName); 
@@ -401,7 +411,7 @@
             nameModal.classList.add('hidden');
             appContainer.classList.remove('hidden');
             
-            // Firebase is now guaranteed to be ready.
+            // Firebase is now guaranteed to be ready (db is set).
             startListNamesListener(safeName);
         });
 
@@ -489,16 +499,19 @@
         }
         
         // --- Firebase Initialization ---
-        // Refactored to be linear and explicitly await sign-in before resolving the sync promise.
+        // Refactored to resolve a status object indicating success/failure.
 
         async function initializeFirebase() {
             setLogLevel('debug');
             
             if (Object.keys(firebaseConfig).length === 0) {
                 nameErrorMessage.textContent = "FATAL ERROR: Firebase configuration is missing.";
-                firebaseInitResolve(); // Resolve promise to unlock UI even on failure
+                firebaseInitResolve({ success: false, message: "Configuration is missing." });
                 return;
             }
+            
+            let success = false;
+            let errorMessage = "Unknown initialization error.";
 
             try {
                 app = initializeApp(firebaseConfig);
@@ -517,16 +530,15 @@
                     console.log("[DEBUG] Signed in Anonymously.");
                 }
                 
-                // 3. GUARANTEE RESOLUTION: The critical promise is resolved now that auth is established.
-                firebaseInitResolve(); 
+                success = true; // Only set success to true after all steps complete
 
             } catch (error) {
-                nameErrorMessage.textContent = "Firebase authentication failed: " + error.message;
+                errorMessage = "Firebase initialization/auth failed: " + error.message;
                 console.error("Firebase Initialization Error:", error);
-                
-                // 4. GUARANTEE RESOLUTION: Resolve even if there was an error, to unblock the UI.
-                firebaseInitResolve(); 
             }
+            
+            // 3. GUARANTEE RESOLUTION: Resolve the critical promise with the final status.
+            firebaseInitResolve({ success: success, message: errorMessage });
         }
         
         // Start the application setup
